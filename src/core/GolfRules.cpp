@@ -1,7 +1,5 @@
 #include "GolfRules.h"
 
-#if defined(CROSSPOINT_GOLF)
-
 namespace {
 
 constexpr uint8_t MAX_COUNTER = 99;
@@ -163,5 +161,3 @@ bool retreatGolfTurn(GolfRound& round) {
   }
   return true;
 }
-
-#endif

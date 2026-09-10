@@ -1,6 +1,8 @@
 #include "HitTester.h"
 #include "PgmCanvas.h"
 #include "TouchInput.h"
+#include "core/Course.h"
+#include "store/RoundStore.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,23 @@ enum Action { Exit = 1, Previous, Hold, Next };
 
 PgmCanvas canvas;
 HitTester hitTester;
+
+bool selfTest() {
+  static GolfRound source;
+  static GolfRound loaded;
+  if (!applyCourse(source, GOLF_BUILT_IN_COURSES[0], "Blue")) return false;
+  source.dateYmd = static_cast<uint16_t>((26U << 9) | (9U << 5) | 10U);
+  source.currentHole = 3;
+  source.players[0].score.putts[0] = 2;
+  source.players[0].score.in100[0] = 2;
+  source.players[0].score.out100[0] = 2;
+  if (!RoundStore::write(source)) return false;
+  const GolfJsonResult result = RoundStore::read(loaded);
+  const bool ok = result.status == GolfJsonStatus::Ok && memcmp(&source, &loaded, sizeof(source)) == 0;
+  RoundStore::clear();
+  if (ok) puts("OK");
+  return ok;
+}
 
 const char* kindName(const TouchEvent::Kind kind) {
   switch (kind) {
@@ -92,6 +111,7 @@ void logEvent(const TouchEvent& touchEvent, const int action) {
 }  // namespace
 
 int main(const int argc, char** argv) {
+  if (argc == 2 && strcmp(argv[1], "--selftest") == 0) return selfTest() ? 0 : 1;
   if (argc == 3 && strcmp(argv[1], "--render") == 0) return render(argv[2], false, true) ? 0 : 1;
 
   TouchInput input;
