@@ -3,6 +3,8 @@
 #include <stdio.h>
 
 #include "PgmCanvas.h"
+#include "MarkSheet.h"
+#include "core/GolfPenalty.h"
 #include "core/GolfStats.h"
 
 namespace {
@@ -50,6 +52,7 @@ ScoringLayout scoringLayout(const GolfField focused) {
   layout.previous = {0, HEADER_HEIGHT, NAV_WIDTH, HOLE_STRIP_HEIGHT};
   layout.next = {PgmCanvas::WIDTH - NAV_WIDTH, HEADER_HEIGHT, NAV_WIDTH, HOLE_STRIP_HEIGHT};
   layout.context = {0, HEADER_HEIGHT + HOLE_STRIP_HEIGHT, PgmCanvas::WIDTH, CONTEXT_HEIGHT};
+  layout.fairway = {PgmCanvas::WIDTH - 270, layout.context.y + 4, 232, layout.context.height - 8};
   layout.footer = {0, PgmCanvas::HEIGHT - FOOTER_HEIGHT, PgmCanvas::WIDTH, FOOTER_HEIGHT};
   layout.totals = {0, layout.footer.y - TOTALS_HEIGHT, PgmCanvas::WIDTH, TOTALS_HEIGHT};
   layout.thisHole = {0, layout.totals.y, PgmCanvas::WIDTH / 2, TOTALS_HEIGHT};
@@ -109,6 +112,15 @@ ScoringView scoringView(const GolfRound& round, const GolfField focused) {
   view.thisHoleValue = golfHoleScore(round, display, hole);
   view.thru = golfThru(round, *score);
   view.hasPar = golfHasPar(round);
+  view.fairwayVisible = !view.hasPar || round.par[hole] == 4 || round.par[hole] == 5;
+  view.fairwayHit = golfFairwayHit(*score, hole);
+  for (uint8_t index = 0; index < 3; ++index) {
+    view.fieldMarked[index] = golfPenaltyMarkersForField(*score, hole, static_cast<GolfField>(index)) != 0;
+  }
+  view.bunkerMarked = golfGreensideBunker(*score, hole);
+  const uint16_t penalties = golfPenaltyStrokesForHole(*score, hole);
+  if (penalties == 0) snprintf(view.markLabel, sizeof(view.markLabel), "MARK");
+  else snprintf(view.markLabel, sizeof(view.markLabel), "MARK +%u", penalties);
   snprintf(view.roundLabel, sizeof(view.roundLabel), "ROUND · THRU %u", view.thru);
   if (view.hasPar) {
     const int value = golfToPar(round, *score);

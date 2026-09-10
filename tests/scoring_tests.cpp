@@ -1,8 +1,10 @@
 #include <assert.h>
 #include <string.h>
 
+#include "MarkSheet.h"
 #include "ScoringScreen.h"
 #include "core/Course.h"
+#include "core/GolfStats.h"
 #include "store/RoundStore.h"
 
 namespace {
@@ -25,6 +27,11 @@ void testLayout() {
   assert(!putts.menu.contains(putts.mark.x, putts.mark.y));
   const ScoringLayout inside = scoringLayout(GolfField::In100);
   assert(inside.metrics[1].height > inside.metrics[0].height);
+  assert(putts.fairway.width > 0 && putts.context.contains(putts.fairway.x, putts.fairway.y));
+  const MarkSheetLayout mark = markSheetLayout();
+  assert(mark.scrim.y == 0 && mark.sheet.y == mark.scrim.height);
+  assert(mark.hazardMinus.width >= 130 && mark.hazardPlus.height >= 130);
+  assert(mark.done.y + mark.done.height <= 1448);
 }
 
 void testSeededAndLoggedView() {
@@ -127,6 +134,105 @@ void testSyntheticEventWalkPersists() {
   assert(RoundStore::clear());
 }
 
+void testFairwayPillAndToggle() {
+  resetRound();
+  round.par[0] = 3;
+  assert(!scoringView(round, GolfField::Putts).fairwayVisible);
+  round.par[0] = 4;
+  ScoringView view = scoringView(round, GolfField::Putts);
+  assert(view.fairwayVisible && !view.fairwayHit && view.seeded);
+  const uint8_t previewPutts = view.values[0];
+  const uint8_t previewIn100 = view.values[1];
+  assert(toggleGolfFairway(round));
+  assert(golfHoleIsLogged(round.players[0].score, 0));
+  assert(round.players[0].score.putts[0] == previewPutts);
+  assert(round.players[0].score.in100[0] == previewIn100);
+  assert(scoringView(round, GolfField::Putts).fairwayHit);
+  assert(toggleGolfFairway(round) && !golfFairwayHit(round.players[0].score, 0));
+  round.par[0] = 5;
+  assert(scoringView(round, GolfField::Putts).fairwayVisible);
+  memset(round.par, 0, sizeof(round.par));
+  assert(!golfHasPar(round) && scoringView(round, GolfField::Putts).fairwayVisible);
+}
+
+void testMarkSheetMutations() {
+  resetRound();
+  MarkSheetState state = initialMarkSheetState();
+  assert(state.field == GolfField::Out100);
+  const ScoringView preview = scoringView(round, GolfField::Putts);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, false) == MarkMutationResult::Changed);
+  assert(round.players[0].score.putts[0] == preview.values[0]);
+  assert(round.players[0].score.in100[0] == preview.values[1]);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, true) == MarkMutationResult::Changed);
+  GolfPlayerScore& score = round.players[0].score;
+  assert(score.putts[0] == preview.values[0] && score.in100[0] == preview.values[1]);
+  assert(score.out100[0] == preview.values[2] + 1);
+  assert(golfHazardsForHole(score, 0) == 1 && golfPenaltyStrokesForHole(score, 0) == 1);
+  assert(golfPenaltyMarkersForField(score, 0, GolfField::Out100) == 1);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, false) == MarkMutationResult::Changed);
+  assert(score.out100[0] == preview.values[2] && score.penaltyCount[0] == 0);
+
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Ob, true) == MarkMutationResult::Changed);
+  assert(score.out100[0] == preview.values[2] + 1);
+  assert(golfPenaltyStrokesForHole(score, 0) == 2);
+  selectMarkField(state, GolfField::In100);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, true) == MarkMutationResult::Changed);
+  assert(score.in100[0] == preview.values[1] + 1);
+  assert(golfPenaltyMarkersForField(score, 0, GolfField::In100, GolfPenaltyKind::Hazard) == 1);
+
+  resetRound();
+  state = initialMarkSheetState();
+  const ScoringView bunkerPreview = scoringView(round, GolfField::Putts);
+  assert(toggleMarkBunker(round));
+  assert(golfGreensideBunker(round.players[0].score, 0));
+  assert(round.players[0].score.putts[0] == bunkerPreview.values[0]);
+  assert(round.players[0].score.in100[0] == bunkerPreview.values[1]);
+  assert(toggleMarkBunker(round) && !golfGreensideBunker(round.players[0].score, 0));
+}
+
+void testMarkLifoCapAndView() {
+  resetRound();
+  MarkSheetState state = initialMarkSheetState();
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, true) == MarkMutationResult::Changed);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Ob, true) == MarkMutationResult::Changed);
+  GolfPlayerScore& score = round.players[0].score;
+  assert(!golfLatestPenaltyForFieldIs(score, 0, GolfField::Out100, GolfPenaltyKind::Hazard));
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, false) == MarkMutationResult::NoChange);
+  assert(score.penaltyCount[0] == 2);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Ob, false) == MarkMutationResult::Changed);
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, false) == MarkMutationResult::Changed);
+
+  for (uint8_t index = 0; index < GolfRound::MAX_PENALTIES_PER_HOLE; ++index) {
+    assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, true) == MarkMutationResult::Changed);
+  }
+  const GolfPlayerScore beforeFull = score;
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Ob, true) == MarkMutationResult::HoleFull);
+  assert(memcmp(&beforeFull, &score, sizeof(score)) == 0 && state.holeFull);
+  const MarkSheetView fullView = markSheetView(round, state);
+  assert(fullView.holeFull && fullView.hazards == GolfRound::MAX_PENALTIES_PER_HOLE);
+
+  const ScoringView marked = scoringView(round, GolfField::Putts);
+  assert(marked.thisHoleValue == static_cast<uint16_t>(score.in100[0] + score.out100[0] + 8));
+  assert(strcmp(marked.markLabel, "MARK +8") == 0);
+  assert(!marked.fieldMarked[0] && !marked.fieldMarked[1] && marked.fieldMarked[2]);
+  golfSetGreensideBunker(score, 0, true);
+  assert(scoringView(round, GolfField::Putts).bunkerMarked);
+}
+
+void testMarkEventWalkPersists() {
+  resetRound();
+  MarkSheetState state = initialMarkSheetState();
+  const uint16_t previewScore = scoringView(round, GolfField::Putts).thisHoleValue;
+  assert(changeMarkPenalty(round, state, GolfPenaltyKind::Hazard, true) == MarkMutationResult::Changed);
+  assert(scoringView(round, GolfField::Putts).thisHoleValue == previewScore + 2);
+  assert(RoundStore::write(round));
+  GolfRound loaded{};
+  assert(RoundStore::read(loaded).status == GolfJsonStatus::Ok);
+  assert(golfHazardsForHole(loaded.players[0].score, 0) == 1);
+  assert(golfPenaltyStrokesForHole(loaded.players[0].score, 0) == 1);
+  assert(RoundStore::clear());
+}
+
 }  // namespace
 
 int main() {
@@ -137,5 +243,9 @@ int main() {
   testTurns();
   testCounterCommitAndClamp();
   testSyntheticEventWalkPersists();
+  testFairwayPillAndToggle();
+  testMarkSheetMutations();
+  testMarkLifoCapAndView();
+  testMarkEventWalkPersists();
   return 0;
 }

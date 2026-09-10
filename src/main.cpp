@@ -1,5 +1,6 @@
 #include "HitTester.h"
 #include "Keyboard.h"
+#include "MarkSheet.h"
 #include "PgmCanvas.h"
 #include "ScoringScreen.h"
 #include "SetupScreens.h"
@@ -35,10 +36,20 @@ enum Action {
   MenuBack,
   ConfirmNo,
   ConfirmYes,
+  Fairway,
+  MarkScrim,
+  MarkOut100,
+  MarkIn100,
+  MarkBunker,
+  MarkHazardMinus,
+  MarkHazardPlus,
+  MarkObMinus,
+  MarkObPlus,
+  MarkDone,
 };
 
 enum class Screen { Home, History, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
-                    ConfirmAbandon };
+                    MarkSheet, ConfirmAbandon };
 
 PgmCanvas canvas;
 HitTester hitTester;
@@ -122,14 +133,27 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
   hitTester.add(layout.previous, Action::Previous);
   hitTester.add(layout.next, Action::Next);
 
-  canvas.drawMonoText(layout.context.x + layout.context.width / 2,
+  const int contextCenter = view.fairwayVisible ? (layout.fairway.x / 2) : (layout.context.width / 2);
+  canvas.drawMonoText(contextCenter,
                       layout.context.y + (layout.context.height - canvas.lineHeight(TextSize::Small)) / 2,
                       view.context, TextSize::Small, TextAlign::Center, false, DIM_INK);
+  if (view.fairwayVisible) {
+    if (view.fairwayHit) canvas.fillRect(layout.fairway.x, layout.fairway.y, layout.fairway.width,
+                                         layout.fairway.height);
+    else canvas.drawRect(layout.fairway.x, layout.fairway.y, layout.fairway.width,
+                         layout.fairway.height, 2);
+    drawCentered(layout.fairway, "FAIRWAY", TextSize::Small, view.fairwayHit);
+    hitTester.add(layout.fairway, Action::Fairway);
+  }
   static constexpr char LABELS[3][16] = {"PUTTS", "INSIDE 100", "SCORE ZONE"};
   for (uint8_t index = 0; index < 3; ++index) {
     const Rect rect = layout.metrics[index];
     canvas.fillRect(38, rect.y, PgmCanvas::WIDTH - 76, 2);
     canvas.drawText(48, rect.y + 32, LABELS[index], TextSize::Small, TextAlign::Left, false, DIM_INK);
+    if (view.fieldMarked[index] || (index == static_cast<uint8_t>(GolfField::In100) && view.bunkerMarked)) {
+      const int flagX = 62 + canvas.measureText(LABELS[index], TextSize::Small);
+      canvas.drawText(flagX, rect.y + 32, "!", TextSize::Small);
+    }
     char value[8];
     snprintf(value, sizeof(value), "%u", view.values[index]);
     const TextSize size = index == static_cast<uint8_t>(focused) ? TextSize::Display : TextSize::Body;
@@ -156,11 +180,77 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
   canvas.fillRect(layout.mark.x + layout.mark.width, layout.footer.y, 2, layout.footer.height);
   canvas.fillRect(layout.nextHole.x, layout.nextHole.y, layout.nextHole.width, layout.nextHole.height);
   drawCentered(layout.menu, "MENU", TextSize::Body);
-  drawCentered(layout.mark, "MARK", TextSize::Body, false, GHOST_INK);
+  drawCentered(layout.mark, view.markLabel, TextSize::Body);
   drawCentered(layout.nextHole, "NEXT HOLE >", TextSize::Body, true);
   hitTester.add(layout.menu, Action::Menu);
   hitTester.add(layout.mark, Action::Mark);
   hitTester.add(layout.nextHole, Action::Next);
+}
+
+void drawMarkSheet(const GolfRound& round, const MarkSheetState& state) {
+  drawScoring(round, GolfField::Putts);
+  const MarkSheetView view = markSheetView(round, state);
+  const MarkSheetLayout& layout = view.layout;
+  hitTester.clear();
+
+  canvas.fillRect(layout.scrim.x, layout.scrim.y, layout.scrim.width, layout.scrim.height);
+  canvas.fillRect(layout.sheet.x, layout.sheet.y, layout.sheet.width, layout.sheet.height, false);
+  canvas.drawRect(layout.sheet.x, layout.sheet.y, layout.sheet.width, layout.sheet.height, 3);
+  canvas.drawText(layout.title.x, layout.title.y + 18, view.title, TextSize::Display);
+  canvas.drawText(layout.fieldLabel.x, layout.fieldLabel.y, "PENALTY SHOT FROM:", TextSize::Small,
+                  TextAlign::Left, false, DIM_INK);
+
+  const bool outSelected = view.field == GolfField::Out100;
+  if (outSelected) canvas.fillRect(layout.out100Segment.x, layout.out100Segment.y,
+                                   layout.out100Segment.width, layout.out100Segment.height);
+  else canvas.drawRect(layout.out100Segment.x, layout.out100Segment.y,
+                       layout.out100Segment.width, layout.out100Segment.height, 2);
+  if (!outSelected) canvas.fillRect(layout.in100Segment.x, layout.in100Segment.y,
+                                    layout.in100Segment.width, layout.in100Segment.height);
+  else canvas.drawRect(layout.in100Segment.x, layout.in100Segment.y,
+                       layout.in100Segment.width, layout.in100Segment.height, 2);
+  drawCentered(layout.out100Segment, "SCORE ZONE", TextSize::Small, outSelected);
+  drawCentered(layout.in100Segment, "INSIDE 100", TextSize::Small, !outSelected);
+
+  canvas.drawRect(layout.bunkerRow.x, layout.bunkerRow.y, layout.bunkerRow.width,
+                  layout.bunkerRow.height, 2);
+  canvas.drawText(layout.bunkerRow.x + 24, layout.bunkerRow.y + 49, "Greenside bunker", TextSize::Body);
+  const Rect checkbox{layout.bunkerRow.x + layout.bunkerRow.width - 104, layout.bunkerRow.y + 35, 72, 72};
+  if (view.bunker) {
+    canvas.fillRect(checkbox.x, checkbox.y, checkbox.width, checkbox.height);
+    drawCentered(checkbox, "x", TextSize::Small, true);
+  } else canvas.drawRect(checkbox.x, checkbox.y, checkbox.width, checkbox.height, 3);
+
+  const auto drawPenaltyRow = [&](const Rect row, const Rect minus, const Rect plus, const char* label,
+                                  const uint8_t count, const bool minusEnabled) {
+    canvas.drawRect(row.x, row.y, row.width, row.height, 2);
+    canvas.drawText(row.x + 24, row.y + 49, label, TextSize::Body);
+    canvas.drawRect(minus.x, minus.y, minus.width, minus.height, 2);
+    canvas.drawRect(plus.x, plus.y, plus.width, plus.height, 2);
+    drawCentered(minus, "-", TextSize::Display, false, minusEnabled ? 0 : GHOST_INK);
+    char value[8];
+    snprintf(value, sizeof(value), "%u", count);
+    const Rect countRect{minus.x + minus.width, row.y, plus.x - minus.x - minus.width, row.height};
+    drawCentered(countRect, value, TextSize::Body);
+    drawCentered(plus, "+", TextSize::Display);
+  };
+  drawPenaltyRow(layout.hazardRow, layout.hazardMinus, layout.hazardPlus, "Hazard  +1",
+                 view.hazards, view.hazardMinusEnabled);
+  drawPenaltyRow(layout.obRow, layout.obMinus, layout.obPlus, "Out of bounds  +2",
+                 view.obs, view.obMinusEnabled);
+  if (view.holeFull) drawCentered(layout.status, "HOLE IS FULL", TextSize::Small, false, DIM_INK);
+  canvas.fillRect(layout.done.x, layout.done.y, layout.done.width, layout.done.height);
+  drawCentered(layout.done, "DONE", TextSize::Body, true);
+
+  hitTester.add(layout.scrim, Action::MarkScrim);
+  hitTester.add(layout.out100Segment, Action::MarkOut100);
+  hitTester.add(layout.in100Segment, Action::MarkIn100);
+  hitTester.add(layout.bunkerRow, Action::MarkBunker);
+  hitTester.add(layout.hazardMinus, Action::MarkHazardMinus);
+  hitTester.add(layout.hazardPlus, Action::MarkHazardPlus);
+  hitTester.add(layout.obMinus, Action::MarkObMinus);
+  hitTester.add(layout.obPlus, Action::MarkObPlus);
+  hitTester.add(layout.done, Action::MarkDone);
 }
 
 void drawMenu() {
@@ -212,7 +302,7 @@ SetupScreen setupScreen(const Screen screen) {
 
 bool paint(const char* path, const Screen screen, const GolfRound& round, const GolfField focused,
            const SetupState& setup, const HomeSummary& home, const KeyboardState& keyboard,
-           const bool showOnDevice, const bool fullRefresh) {
+           const MarkSheetState& markState, const bool showOnDevice, const bool fullRefresh) {
   switch (screen) {
     case Screen::Home:
     case Screen::History:
@@ -223,6 +313,7 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
     case Screen::TeeList: drawSetupScreen(canvas, hitTester, setupScreen(screen), setup, home); break;
     case Screen::Keyboard: drawKeyboard(canvas, hitTester, keyboard); break;
     case Screen::Scoring: drawScoring(round, focused); break;
+    case Screen::MarkSheet: drawMarkSheet(round, markState); break;
     case Screen::Menu: drawMenu(); break;
     case Screen::ConfirmAbandon: drawAbandonConfirmation(); break;
   }
@@ -239,8 +330,8 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
 
 bool paintDevice(const Screen screen, const GolfRound& round, const GolfField focused, const SetupState& setup,
                  const HomeSummary& home, const KeyboardState& keyboard, const bool fullRefresh,
-                 unsigned int& paints) {
-  if (!paint(SCREEN_PATH, screen, round, focused, setup, home, keyboard, true, fullRefresh)) return false;
+                 const MarkSheetState& markState, unsigned int& paints) {
+  if (!paint(SCREEN_PATH, screen, round, focused, setup, home, keyboard, markState, true, fullRefresh)) return false;
   ++paints;
   return true;
 }
@@ -278,7 +369,9 @@ int main(const int argc, char** argv) {
     initializeSetup(setup);
     initializeKeyboard(keyboard, "Noah");
     makeGoldenRound(round);
-    return paint(argv[2], Screen::Scoring, round, GolfField::Putts, setup, home, keyboard, false, true) ? 0 : 1;
+    const MarkSheetState markState = initialMarkSheetState();
+    return paint(argv[2], Screen::Scoring, round, GolfField::Putts, setup, home, keyboard, markState,
+                 false, true) ? 0 : 1;
   }
   if (argc == 4 && strcmp(argv[1], "--render") == 0) {
     GolfRound round{};
@@ -288,11 +381,23 @@ int main(const int argc, char** argv) {
     initializeSetup(setup);
     initializeKeyboard(keyboard, "Noah");
     makeGoldenRound(round);
+    MarkSheetState markState = initialMarkSheetState();
     Screen screen = Screen::Home;
     if (strcmp(argv[2], "keyboard") == 0) screen = Screen::Keyboard;
     else if (strcmp(argv[2], "scoring") == 0) screen = Screen::Scoring;
+    else if (strcmp(argv[2], "mark-sheet") == 0) screen = Screen::MarkSheet;
+    else if (strcmp(argv[2], "marked") == 0) {
+      screen = Screen::Scoring;
+      commitGolfPreview(round);
+      GolfPlayerScore& score = round.players[round.currentPlayer].score;
+      golfSetFairwayHit(score, round.currentHole, true);
+      golfSetGreensideBunker(score, round.currentHole, true);
+      golfAppendPenalty(score, round.currentHole, GolfField::Out100, GolfPenaltyKind::Hazard);
+      golfAppendPenalty(score, round.currentHole, GolfField::In100, GolfPenaltyKind::Ob);
+    }
     else if (strcmp(argv[2], "home") != 0) return 2;
-    return paint(argv[3], screen, round, GolfField::Putts, setup, home, keyboard, false, true) ? 0 : 1;
+    return paint(argv[3], screen, round, GolfField::Putts, setup, home, keyboard, markState, false,
+                 true) ? 0 : 1;
   }
 
   GolfRound round{};
@@ -303,6 +408,7 @@ int main(const int argc, char** argv) {
   initializeSetup(setup);
   readHomeSummary(home);
   GolfField focused = GolfField::Putts;
+  MarkSheetState markState = initialMarkSheetState();
   Screen screen = hasRound ? Screen::Scoring : Screen::Home;
   TouchInput input;
   if (!input.openDevice()) {
@@ -319,7 +425,7 @@ int main(const int argc, char** argv) {
   unsigned int paints = 0;
   bool counterDirty = false;
   uint64_t counterChangedAt = 0;
-  if (!paintDevice(screen, round, focused, setup, home, keyboard, true, paints)) return 3;
+  if (!paintDevice(screen, round, focused, setup, home, keyboard, true, markState, paints)) return 3;
   while (true) {
     int timeout = -1;
     if (counterDirty) {
@@ -460,6 +566,46 @@ int main(const int argc, char** argv) {
         screen = Screen::Menu;
         repaint = true;
         forceGc = true;
+      } else if (event.kind == TouchEvent::Kind::Tap && action == Action::Mark) {
+        markState = initialMarkSheetState();
+        screen = Screen::MarkSheet;
+        repaint = true;
+        forceGc = true;
+      } else if (event.kind == TouchEvent::Kind::Tap && action == Action::Fairway) {
+        if (toggleGolfFairway(round)) {
+          counterDirty = true;
+          counterChangedAt = nowMs();
+          repaint = true;
+        }
+      }
+    } else if (screen == Screen::MarkSheet && event.kind == TouchEvent::Kind::Tap) {
+      if (action == Action::MarkDone || action == Action::MarkScrim) {
+        RoundStore::write(round);
+        counterDirty = false;
+        screen = Screen::Scoring;
+        repaint = true;
+        forceGc = true;
+      } else if (action == Action::MarkOut100 || action == Action::MarkIn100) {
+        selectMarkField(markState, action == Action::MarkOut100 ? GolfField::Out100 : GolfField::In100);
+        repaint = true;
+      } else if (action == Action::MarkBunker) {
+        if (toggleMarkBunker(round)) {
+          counterDirty = true;
+          counterChangedAt = nowMs();
+          repaint = true;
+        }
+      } else if (action == Action::MarkHazardMinus || action == Action::MarkHazardPlus ||
+                 action == Action::MarkObMinus || action == Action::MarkObPlus) {
+        const GolfPenaltyKind kind = (action == Action::MarkHazardMinus || action == Action::MarkHazardPlus)
+                                         ? GolfPenaltyKind::Hazard
+                                         : GolfPenaltyKind::Ob;
+        const bool increment = action == Action::MarkHazardPlus || action == Action::MarkObPlus;
+        const MarkMutationResult result = changeMarkPenalty(round, markState, kind, increment);
+        if (result == MarkMutationResult::Changed) {
+          counterDirty = true;
+          counterChangedAt = nowMs();
+        }
+        repaint = result != MarkMutationResult::NoChange;
       }
     } else if (screen == Screen::Menu && event.kind == TouchEvent::Kind::Tap) {
       if (action == Action::MenuBack) {
@@ -484,6 +630,6 @@ int main(const int argc, char** argv) {
         forceGc = true;
       }
     }
-    if (repaint && !paintDevice(screen, round, focused, setup, home, keyboard, forceGc, paints)) return 3;
+    if (repaint && !paintDevice(screen, round, focused, setup, home, keyboard, forceGc, markState, paints)) return 3;
   }
 }

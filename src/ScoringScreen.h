@@ -11,6 +11,7 @@ struct ScoringLayout {
   Rect previous;
   Rect next;
   Rect context;
+  Rect fairway;
   Rect metrics[3];
   Rect totals;
   Rect thisHole;
@@ -26,6 +27,10 @@ struct ScoringView {
   GolfField focused;
   bool seeded;
   bool hasPar;
+  bool fairwayVisible;
+  bool fairwayHit;
+  bool fieldMarked[3];
+  bool bunkerMarked;
   uint8_t values[3];
   uint16_t thisHoleValue;
   uint8_t thru;
@@ -34,6 +39,7 @@ struct ScoringView {
   char context[32];
   char roundLabel[32];
   char roundValue[16];
+  char markLabel[16];
 };
 
 struct GolfAdvanceResult {
@@ -47,4 +53,3 @@ bool golfHoleIsLogged(const GolfPlayerScore& score, uint8_t hole);
 bool commitGolfPreview(GolfRound& round);
 GolfAdvanceResult commitAndAdvanceGolfTurn(GolfRound& round);
 bool changeGolfField(GolfRound& round, GolfField field, bool decrement, uint16_t repeatCount = 1);
-

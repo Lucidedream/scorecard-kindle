@@ -10,6 +10,7 @@ mkdir -p "$OUTPUT_DIR"
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
   "$SCRIPT_DIR/src/main.cpp" "$SCRIPT_DIR/src/PgmCanvas.cpp" "$SCRIPT_DIR/src/ScoringScreen.cpp" \
+  "$SCRIPT_DIR/src/MarkSheet.cpp" \
   "$SCRIPT_DIR/src/SetupScreens.cpp" "$SCRIPT_DIR/src/Keyboard.cpp" \
   "$SCRIPT_DIR/src/TouchInput.cpp" \
   "$SCRIPT_DIR/src/core/Course.cpp" "$SCRIPT_DIR/src/core/GolfRules.cpp" \
@@ -36,7 +37,7 @@ mkdir -p "$OUTPUT_DIR"
 
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
-  "$SCRIPT_DIR/tests/scoring_tests.cpp" "$SCRIPT_DIR/src/ScoringScreen.cpp" \
+  "$SCRIPT_DIR/tests/scoring_tests.cpp" "$SCRIPT_DIR/src/ScoringScreen.cpp" "$SCRIPT_DIR/src/MarkSheet.cpp" \
   "$SCRIPT_DIR/src/core/Course.cpp" "$SCRIPT_DIR/src/core/GolfRules.cpp" \
   "$SCRIPT_DIR/src/core/GolfPenalty.cpp" "$SCRIPT_DIR/src/core/GolfStats.cpp" \
   "$SCRIPT_DIR/src/core/GolfValidate.cpp" "$SCRIPT_DIR/src/store/GolfPaths.cpp" \
@@ -63,7 +64,9 @@ rm -r "$SCORING_TEST_DIR"
 "$OUTPUT_DIR/scorecard" --render home "$OUTPUT_DIR/home.pgm"
 "$OUTPUT_DIR/scorecard" --render keyboard "$OUTPUT_DIR/keyboard.pgm"
 "$OUTPUT_DIR/scorecard" --render scoring "$OUTPUT_DIR/scoring.pgm"
+"$OUTPUT_DIR/scorecard" --render mark-sheet "$OUTPUT_DIR/mark-sheet.pgm"
+"$OUTPUT_DIR/scorecard" --render marked "$OUTPUT_DIR/marked.pgm"
 SELFTEST_DIR=$(mktemp -d /tmp/scorecard-selftest.XXXXXX)
 SCORECARD_DIR="$SELFTEST_DIR" "$OUTPUT_DIR/scorecard" --selftest
 rm -r "$SELFTEST_DIR"
-echo "Host tests passed; rendered home.pgm, keyboard.pgm, and scoring.pgm"
+echo "Host tests passed; rendered home.pgm, keyboard.pgm, scoring.pgm, mark-sheet.pgm, and marked.pgm"
