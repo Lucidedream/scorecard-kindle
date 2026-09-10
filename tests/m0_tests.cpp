@@ -3,6 +3,7 @@
 #include "TouchInput.h"
 
 #include <assert.h>
+#include <stdio.h>
 
 namespace {
 
@@ -45,7 +46,38 @@ void testTextMetrics() {
   assert(canvas.lineHeight(TextSize::Small) < canvas.lineHeight(TextSize::Body));
   assert(canvas.lineHeight(TextSize::Body) < canvas.lineHeight(TextSize::Display));
   assert(canvas.measureText("iiii", TextSize::Body) < canvas.measureText("WWWW", TextSize::Body));
+  assert(canvas.measureText("W", TextSize::Small) < canvas.measureText("W", TextSize::Display));
   assert(canvas.measureText("Café £12", TextSize::Small) > 0);
+}
+
+void testAntialiasing() {
+  PgmCanvas canvas;
+  canvas.clear();
+  canvas.drawText(40, 40, "Rag", TextSize::Display);
+
+  const char* path = "/tmp/m0_aa_test.pgm";
+  assert(canvas.write(path));
+  FILE* file = fopen(path, "rb");
+  assert(file != nullptr);
+  int width = 0;
+  int height = 0;
+  int maxValue = 0;
+  assert(fscanf(file, "P5 %d %d %d", &width, &height, &maxValue) == 3);
+  fgetc(file);
+
+  bool seen[256] = {};
+  for (long index = 0; index < static_cast<long>(width) * height; ++index) seen[fgetc(file) & 0xFF] = true;
+  fclose(file);
+
+  int distinct = 0;
+  int midGray = 0;
+  for (int value = 0; value < 256; ++value) {
+    if (!seen[value]) continue;
+    ++distinct;
+    if (value > 24 && value < 231) ++midGray;
+  }
+  assert(distinct > 4);  // not a 1-bit blit
+  assert(midGray > 0);   // glyph edges carry partial coverage
 }
 
 }  // namespace
@@ -54,5 +86,6 @@ int main() {
   testGestures();
   testHitTester();
   testTextMetrics();
+  testAntialiasing();
   return 0;
 }

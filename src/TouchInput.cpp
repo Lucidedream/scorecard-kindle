@@ -40,6 +40,7 @@ TouchEvent GestureClassifier::finish(const uint64_t timeMs, const int x, const i
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 namespace {
 
@@ -60,8 +61,13 @@ int scaleAxis(const int value, const int minimum, const int maximum, const int s
   return scaled;
 }
 
-uint64_t eventTimeMs(const input_event& event) {
-  return static_cast<uint64_t>(event.time.tv_sec) * 1000U + static_cast<uint64_t>(event.time.tv_usec) / 1000U;
+// The kernel stamps each input_event, but musl's time64 <linux/input.h> drops the
+// `time` member, so read a monotonic clock instead. The few microseconds of skew
+// versus the event stamp do not matter against a 450 ms long-press threshold.
+uint64_t nowMs() {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return static_cast<uint64_t>(now.tv_sec) * 1000U + static_cast<uint64_t>(now.tv_nsec) / 1000000U;
 }
 
 }  // namespace
@@ -155,14 +161,14 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
         if (event.value >= 0) {
           trackingTouch = true;
           downPending = true;
-          downTimeMs = eventTimeMs(event);
+          downTimeMs = nowMs();
           haveX = false;
           haveY = false;
         } else if (trackingTouch && haveX && haveY) {
           const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
           const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
           if (downPending) classifier.begin(downTimeMs, x, y);
-          touchEvent = classifier.finish(eventTimeMs(event), x, y);
+          touchEvent = classifier.finish(nowMs(), x, y);
           return true;
         }
       }
@@ -170,12 +176,12 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
       if (event.value != 0) {
         trackingTouch = true;
         downPending = true;
-        downTimeMs = eventTimeMs(event);
+        downTimeMs = nowMs();
       } else if (trackingTouch && haveX && haveY) {
         const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
         const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
         if (downPending) classifier.begin(downTimeMs, x, y);
-        touchEvent = classifier.finish(eventTimeMs(event), x, y);
+        touchEvent = classifier.finish(nowMs(), x, y);
         return true;
       }
     } else if (event.type == EV_SYN && event.code == SYN_REPORT && haveX && haveY) {

@@ -22,6 +22,7 @@ class PgmCanvas {
 
  private:
   void setPixel(int x, int y, bool black);
+  void blendPixel(int x, int y, uint8_t coverage, bool black);
   void drawGlyph(int x, int y, uint32_t codepoint, TextSize size, bool black);
 
   uint8_t pixels[static_cast<size_t>(WIDTH * HEIGHT)]{};
