@@ -8,6 +8,7 @@
 #include "SetupScreens.h"
 #include "SummaryScreen.h"
 #include "TouchInput.h"
+#include "UiStyle.h"
 #include "core/Course.h"
 #include "core/GolfStats.h"
 #include "store/RoundArchive.h"
@@ -25,8 +26,6 @@ namespace {
 constexpr char SCREEN_PATH[] = "/tmp/scorecard-screen.pgm";
 constexpr char DIAGNOSTIC_SCREEN_PATH[] = "/mnt/us/scorecard/screen.pgm";
 constexpr char RUNTIME_LOG_PATH[] = "/mnt/us/scorecard/runtime.log";
-constexpr uint8_t DIM_INK = 128;
-constexpr uint8_t GHOST_INK = 158;
 constexpr uint64_t IDLE_WRITE_MS = 5000;
 
 enum Action {
@@ -129,6 +128,14 @@ void drawCentered(const Rect rect, const char* label, const TextSize size, const
   canvas.drawText(rect.x + rect.width / 2, y, label, size, TextAlign::Center, inverted, shade);
 }
 
+void drawPair(const Rect row, const char* label, const char* value, const TextSize valueSize,
+              const uint8_t labelInk = INK_DIM, const uint8_t valueInk = 0) {
+  const int labelY = row.y + (row.height - canvas.lineHeight(TextSize::Small)) / 2;
+  const int valueY = row.y + (row.height - canvas.lineHeight(valueSize)) / 2;
+  canvas.drawText(row.x + 48, labelY, label, TextSize::Small, TextAlign::Left, false, labelInk);
+  canvas.drawText(row.x + row.width - 48, valueY, value, valueSize, TextAlign::Right, false, valueInk);
+}
+
 void drawScoring(const GolfRound& round, const GolfField focused) {
   const ScoringView view = scoringView(round, focused);
   const ScoringLayout& layout = view.layout;
@@ -155,7 +162,7 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
   const int contextCenter = view.fairwayVisible ? (layout.fairway.x / 2) : (layout.context.width / 2);
   canvas.drawMonoText(contextCenter,
                       layout.context.y + (layout.context.height - canvas.lineHeight(TextSize::Small)) / 2,
-                      view.context, TextSize::Small, TextAlign::Center, false, DIM_INK);
+                      view.context, TextSize::Small, TextAlign::Center, false, INK_DIM);
   if (view.fairwayVisible) {
     if (view.fairwayHit) canvas.fillRect(layout.fairway.x, layout.fairway.y, layout.fairway.width,
                                          layout.fairway.height);
@@ -168,31 +175,32 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
   for (uint8_t index = 0; index < 3; ++index) {
     const Rect rect = layout.metrics[index];
     canvas.fillRect(38, rect.y, PgmCanvas::WIDTH - 76, 2);
-    canvas.drawText(48, rect.y + 32, LABELS[index], TextSize::Small, TextAlign::Left, false, DIM_INK);
+    const bool isFocused = index == static_cast<uint8_t>(focused);
+    const int labelY = rect.y + (rect.height - canvas.lineHeight(TextSize::Small)) / 2;
+    canvas.drawText(56, labelY, LABELS[index], TextSize::Small, TextAlign::Left, false,
+                    isFocused ? 0 : INK_DIM);
+    if (isFocused) canvas.fillRect(38, rect.y + rect.height / 2 - 50, 6, 100);
     if (view.fieldMarked[index] || (index == static_cast<uint8_t>(GolfField::In100) && view.bunkerMarked)) {
       const int flagX = 62 + canvas.measureText(LABELS[index], TextSize::Small);
-      canvas.drawText(flagX, rect.y + 32, "!", TextSize::Small);
+      canvas.drawText(flagX, labelY, "!", TextSize::Small);
     }
     char value[8];
     snprintf(value, sizeof(value), "%u", view.values[index]);
-    const TextSize size = index == static_cast<uint8_t>(focused) ? TextSize::Display : TextSize::Body;
-    const uint8_t shade = view.seeded ? GHOST_INK : 0;
+    const TextSize size = isFocused ? TextSize::Display : TextSize::Body;
+    const uint8_t shade = view.seeded ? INK_GHOST : 0;
     canvas.drawText(PgmCanvas::WIDTH - 54, rect.y + (rect.height - canvas.lineHeight(size)) / 2,
                     value, size, TextAlign::Right, false, shade);
     hitTester.add(rect, Action::Putts + index);
   }
 
   canvas.fillRect(0, layout.totals.y, PgmCanvas::WIDTH, 2);
-  canvas.fillRect(PgmCanvas::WIDTH / 2 - 1, layout.totals.y + 24, 2, layout.totals.height - 48);
-  canvas.drawText(42, layout.totals.y + 24, "THIS HOLE", TextSize::Small, TextAlign::Left, false, DIM_INK);
-  canvas.drawText(PgmCanvas::WIDTH / 2 + 42, layout.totals.y + 24, view.roundLabel, TextSize::Small,
-                  TextAlign::Left, false, DIM_INK);
+  canvas.fillRect(PgmCanvas::WIDTH / 2 - 1, layout.totals.y + 22, 2, layout.totals.height - 44);
   char thisHole[8];
   snprintf(thisHole, sizeof(thisHole), "%u", view.thisHoleValue);
-  canvas.drawText(layout.thisHole.x + layout.thisHole.width / 2, layout.totals.y + 61, thisHole,
-                  TextSize::Display, TextAlign::Center, false, view.seeded ? GHOST_INK : 0);
-  canvas.drawText(layout.round.x + layout.round.width / 2, layout.totals.y + 61, view.roundValue,
-                  TextSize::Display, TextAlign::Center);
+  drawPair({layout.thisHole.x, layout.thisHole.y, layout.thisHole.width, layout.thisHole.height},
+           "THIS HOLE", thisHole, TextSize::Display, INK_DIM, view.seeded ? INK_GHOST : 0);
+  drawPair({layout.round.x, layout.round.y, layout.round.width, layout.round.height},
+           view.roundLabel, view.roundValue, TextSize::Display);
 
   canvas.fillRect(0, layout.footer.y, PgmCanvas::WIDTH, 2);
   canvas.fillRect(layout.menu.width, layout.footer.y, 2, layout.footer.height);
@@ -217,7 +225,7 @@ void drawMarkSheet(const GolfRound& round, const MarkSheetState& state) {
   canvas.drawRect(layout.sheet.x, layout.sheet.y, layout.sheet.width, layout.sheet.height, 3);
   canvas.drawText(layout.title.x, layout.title.y + 18, view.title, TextSize::Display);
   canvas.drawText(layout.fieldLabel.x, layout.fieldLabel.y, "PENALTY SHOT FROM:", TextSize::Small,
-                  TextAlign::Left, false, DIM_INK);
+                  TextAlign::Left, false, INK_DIM);
 
   const bool outSelected = view.field == GolfField::Out100;
   if (outSelected) canvas.fillRect(layout.out100Segment.x, layout.out100Segment.y,
@@ -246,18 +254,18 @@ void drawMarkSheet(const GolfRound& round, const MarkSheetState& state) {
     canvas.drawText(row.x + 24, row.y + 49, label, TextSize::Body);
     canvas.drawRect(minus.x, minus.y, minus.width, minus.height, 2);
     canvas.drawRect(plus.x, plus.y, plus.width, plus.height, 2);
-    drawCentered(minus, "-", TextSize::Display, false, minusEnabled ? 0 : GHOST_INK);
+    drawCentered(minus, "-", TextSize::Body, false, minusEnabled ? 0 : INK_GHOST);
     char value[8];
     snprintf(value, sizeof(value), "%u", count);
     const Rect countRect{minus.x + minus.width, row.y, plus.x - minus.x - minus.width, row.height};
     drawCentered(countRect, value, TextSize::Body);
-    drawCentered(plus, "+", TextSize::Display);
+    drawCentered(plus, "+", TextSize::Body);
   };
   drawPenaltyRow(layout.hazardRow, layout.hazardMinus, layout.hazardPlus, "Hazard  +1",
                  view.hazards, view.hazardMinusEnabled);
   drawPenaltyRow(layout.obRow, layout.obMinus, layout.obPlus, "Out of bounds  +2",
                  view.obs, view.obMinusEnabled);
-  if (view.holeFull) drawCentered(layout.status, "HOLE IS FULL", TextSize::Small, false, DIM_INK);
+  if (view.holeFull) drawCentered(layout.status, "HOLE IS FULL", TextSize::Small, false, INK_DIM);
   canvas.fillRect(layout.done.x, layout.done.y, layout.done.width, layout.done.height);
   drawCentered(layout.done, "DONE", TextSize::Body, true);
 
@@ -275,21 +283,26 @@ void drawMarkSheet(const GolfRound& round, const MarkSheetState& state) {
 void drawMenu() {
   hitTester.clear();
   canvas.clear();
-  canvas.drawText(42, 38, "ROUND MENU", TextSize::Display);
-  const Rect scorecard{36, 145, 1000, 220};
-  const Rect review{36, 385, 1000, 220};
-  const Rect finish{36, 625, 1000, 220};
-  const Rect abandon{36, 865, 1000, 220};
+  canvas.drawText(42, 46, "ROUND MENU", TextSize::Display);
+  const Rect scorecard{36, 176, 1000, 210};
+  const Rect review{36, 386, 1000, 210};
+  const Rect finish{36, 596, 1000, 210};
+  const Rect abandon{36, 806, 1000, 210};
   const Rect back{0, 1258, PgmCanvas::WIDTH, 190};
-  canvas.drawRect(scorecard.x, scorecard.y, scorecard.width, scorecard.height, 2);
-  canvas.drawRect(review.x, review.y, review.width, review.height, 2);
-  canvas.drawRect(finish.x, finish.y, finish.width, finish.height, 2);
-  canvas.drawRect(abandon.x, abandon.y, abandon.width, abandon.height, 2);
+  canvas.fillRect(scorecard.x, scorecard.y, scorecard.width, 2);
+  canvas.fillRect(review.x, review.y, review.width, 2);
+  canvas.fillRect(finish.x, finish.y, finish.width, 2);
+  canvas.fillRect(abandon.x, abandon.y, abandon.width, 2);
+  canvas.fillRect(abandon.x, abandon.y + abandon.height - 2, abandon.width, 2);
   canvas.fillRect(back.x, back.y, back.width, 2);
-  drawCentered(scorecard, "View scorecard", TextSize::Body);
-  drawCentered(review, "Hole review", TextSize::Body);
-  drawCentered(finish, "Finish round", TextSize::Body);
-  drawCentered(abandon, "Abandon round", TextSize::Body);
+  const auto menuLabel = [&](const Rect row, const char* label) {
+    canvas.drawText(row.x + 20, row.y + (row.height - canvas.lineHeight(TextSize::Body)) / 2,
+                    label, TextSize::Body);
+  };
+  menuLabel(scorecard, "View scorecard");
+  menuLabel(review, "Hole review");
+  menuLabel(finish, "Finish round");
+  menuLabel(abandon, "Abandon round");
   drawCentered(back, "<  BACK TO SCORING", TextSize::Body);
   hitTester.add(scorecard, Action::MenuScorecard);
   hitTester.add(review, Action::MenuHoleReview);
@@ -299,8 +312,9 @@ void drawMenu() {
 }
 
 void drawViewHeader(const char* title, const char* value, const char* player, const bool showPlayer) {
-  canvas.drawText(36, 38, title, TextSize::Body);
-  canvas.drawText(PgmCanvas::WIDTH - 36, 38, value, TextSize::Body, TextAlign::Right);
+  constexpr int HEADER_Y = 42;
+  canvas.drawText(36, HEADER_Y, title, TextSize::Body);
+  canvas.drawText(PgmCanvas::WIDTH - 36, HEADER_Y, value, TextSize::Body, TextAlign::Right);
   if (showPlayer) {
     const Rect chip{PgmCanvas::WIDTH - 350, 100, 314, 104};
     canvas.drawRect(chip.x, chip.y, chip.width, chip.height, 2);
@@ -321,60 +335,61 @@ void drawScorecard(const GolfRound& round) {
   hitTester.clear();
   canvas.clear();
   drawViewHeader(view.header, view.roundValue, view.player, view.playerCount > 1);
-  constexpr int LABEL_W = 112;
-  constexpr int HOLE_W = 40;
-  constexpr int OUT_W = 56;
-  constexpr int IN_W = 56;
-  constexpr int TOTAL_W = 68;
-  constexpr int TOP = 230;
-  constexpr int ROW_H = 130;
+  constexpr int MARGIN = 28;
+  constexpr int LABEL_W = 116;
+  constexpr int DATA_W = (PgmCanvas::WIDTH - 2 * MARGIN - LABEL_W) / 10;
+  constexpr int TOP = 218;
+  constexpr int HEADER_H = 52;
+  constexpr int ROW_H = 60;
+  constexpr int BLOCK_GAP = 28;
   static constexpr char ROWS[6][12] = {"PAR", "SCORE", "PUTTS", "IN 100", "ZONE", "PEN"};
-  canvas.fillRect(0, TOP, PgmCanvas::WIDTH, 2);
-  canvas.drawText(12, TOP + 36, "HOLE", TextSize::Small);
-  int x = LABEL_W;
-  for (uint8_t hole = 0; hole < 18; ++hole) {
-    if (hole == 9) {
-      canvas.drawMonoText(x + OUT_W / 2, TOP + 36, "OUT", TextSize::Small, TextAlign::Center);
-      x += OUT_W;
-    }
-    char label[4];
-    snprintf(label, sizeof(label), "%u", hole + 1);
-    canvas.drawMonoText(x + HOLE_W / 2, TOP + 36, label, TextSize::Small, TextAlign::Center);
-    x += HOLE_W;
-  }
-  canvas.drawMonoText(x + IN_W / 2, TOP + 36, "IN", TextSize::Small, TextAlign::Center);
-  x += IN_W;
-  canvas.drawMonoText(x + TOTAL_W / 2, TOP + 36, "TOT", TextSize::Small, TextAlign::Center);
   const uint8_t firstRow = view.hasPar ? 0 : 1;
-  uint8_t displayRow = 0;
-  for (uint8_t row = firstRow; row < 6; ++row, ++displayRow) {
-    const int y = TOP + ROW_H * (displayRow + 1);
-    const bool scoreRow = row == static_cast<uint8_t>(ScorecardMetric::Score);
-    if (scoreRow) canvas.fillRect(0, y, PgmCanvas::WIDTH, ROW_H);
-    else canvas.fillRect(0, y, PgmCanvas::WIDTH, 2);
-    canvas.drawText(12, y + 38, ROWS[row], TextSize::Small, TextAlign::Left, scoreRow);
-    x = LABEL_W;
-    for (uint8_t hole = 0; hole < 18; ++hole) {
-      if (hole == 9) {
-        canvas.drawMonoText(x + OUT_W / 2, y + 38, view.out[row], TextSize::Small, TextAlign::Center, scoreRow);
-        x += OUT_W;
-      }
-      canvas.drawMonoText(x + HOLE_W / 2, y + 38, view.cells[row][hole], TextSize::Small,
-                          TextAlign::Center, scoreRow);
-      x += HOLE_W;
+  const int shownRows = 6 - firstRow;
+  const int blockHeight = HEADER_H + shownRows * ROW_H;
+  const auto drawNine = [&](const int top, const uint8_t firstHole, const char* blockLabel,
+                            const char* subtotalLabel, const char totals[][8]) {
+    canvas.drawText(MARGIN, top + (HEADER_H - canvas.lineHeight(TextSize::Small)) / 2,
+                    blockLabel, TextSize::Small);
+    for (uint8_t column = 0; column < 9; ++column) {
+      char holeLabel[4];
+      snprintf(holeLabel, sizeof(holeLabel), "%u", firstHole + column + 1);
+      const int center = MARGIN + LABEL_W + column * DATA_W + DATA_W / 2;
+      canvas.drawMonoText(center, top + (HEADER_H - canvas.lineHeight(TextSize::Small)) / 2,
+                          holeLabel, TextSize::Small, TextAlign::Center);
     }
-    canvas.drawMonoText(x + IN_W / 2, y + 38, view.in[row], TextSize::Small, TextAlign::Center, scoreRow);
-    x += IN_W;
-    canvas.drawMonoText(x + TOTAL_W / 2, y + 38, view.total[row], TextSize::Small, TextAlign::Center, scoreRow);
-  }
-  const int tableBottom = TOP + ROW_H * (displayRow + 1);
-  const int separators[5] = {LABEL_W, LABEL_W + 9 * HOLE_W,
-                             LABEL_W + 9 * HOLE_W + OUT_W,
-                             LABEL_W + 18 * HOLE_W + OUT_W,
-                             LABEL_W + 18 * HOLE_W + OUT_W + IN_W};
-  for (const int separator : separators) canvas.fillRect(separator, TOP, 2, tableBottom - TOP);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 1215, "SWIPE FOR STATS", TextSize::Small, TextAlign::Center,
-                  false, DIM_INK);
+    const int totalCenter = MARGIN + LABEL_W + 9 * DATA_W + DATA_W / 2;
+    canvas.drawMonoText(totalCenter, top + (HEADER_H - canvas.lineHeight(TextSize::Small)) / 2,
+                        subtotalLabel, TextSize::Small, TextAlign::Center);
+    canvas.fillRect(MARGIN, top + HEADER_H - 2, PgmCanvas::WIDTH - 2 * MARGIN, 2);
+    uint8_t displayRow = 0;
+    for (uint8_t row = firstRow; row < 6; ++row, ++displayRow) {
+      const int y = top + HEADER_H + displayRow * ROW_H;
+      const bool scoreRow = row == static_cast<uint8_t>(ScorecardMetric::Score);
+      if (displayRow != 0) canvas.fillRect(MARGIN, y, PgmCanvas::WIDTH - 2 * MARGIN, scoreRow ? 4 : 1);
+      const TextSize numberSize = scoreRow ? TextSize::Body : TextSize::Small;
+      canvas.drawText(MARGIN, y + (ROW_H - canvas.lineHeight(TextSize::Small)) / 2,
+                      ROWS[row], TextSize::Small, TextAlign::Left, false,
+                      scoreRow ? 0 : INK_DIM);
+      for (uint8_t column = 0; column < 9; ++column) {
+        const int center = MARGIN + LABEL_W + column * DATA_W + DATA_W / 2;
+        canvas.drawMonoText(center, y + (ROW_H - canvas.lineHeight(numberSize)) / 2,
+                            view.cells[row][firstHole + column], numberSize, TextAlign::Center);
+      }
+      canvas.drawMonoText(totalCenter, y + (ROW_H - canvas.lineHeight(numberSize)) / 2,
+                          totals[row], numberSize, TextAlign::Center);
+    }
+    canvas.fillRect(MARGIN + LABEL_W - 10, top, 2, blockHeight);
+    canvas.fillRect(MARGIN + LABEL_W + 9 * DATA_W, top, 2, blockHeight);
+    canvas.fillRect(MARGIN, top + blockHeight - 2, PgmCanvas::WIDTH - 2 * MARGIN, 2);
+  };
+  drawNine(TOP, 0, "FRONT", "OUT", view.out);
+  const int backTop = TOP + blockHeight + BLOCK_GAP;
+  drawNine(backTop, 9, "BACK", "IN", view.in);
+  const Rect totalLine{MARGIN, backTop + blockHeight + 18, PgmCanvas::WIDTH - 2 * MARGIN, 104};
+  canvas.fillRect(totalLine.x, totalLine.y, totalLine.width, 4);
+  drawPair(totalLine, "TOTAL", view.roundValue, TextSize::Display, 0);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 1218, "SWIPE FOR STATS", TextSize::Small, TextAlign::Center,
+                  false, INK_DIM);
   drawBottomBack();
 }
 
@@ -388,14 +403,14 @@ void drawStats(const GolfRound& round) {
   const char* values[10] = {view.putts, view.onePutts, view.threePutts, view.longGame, view.shortGame,
                             view.putting, view.penalties, view.fairways, view.greens, view.worst};
   const uint8_t rowCount = view.hasPar ? 10 : 9;
-  int y = 230;
-  for (uint8_t row = 0; row < rowCount; ++row, y += 98) {
+  int y = 220;
+  constexpr int ROW_HEIGHT = 99;
+  for (uint8_t row = 0; row < rowCount; ++row, y += ROW_HEIGHT) {
     canvas.fillRect(36, y, PgmCanvas::WIDTH - 72, 2);
-    canvas.drawText(52, y + 27, LABELS[row], TextSize::Small, TextAlign::Left, false, DIM_INK);
-    canvas.drawText(PgmCanvas::WIDTH - 52, y + 27, values[row], TextSize::Small, TextAlign::Right);
+    drawPair({4, y, PgmCanvas::WIDTH - 8, ROW_HEIGHT}, LABELS[row], values[row], TextSize::Small);
   }
   canvas.drawText(PgmCanvas::WIDTH / 2, 1215, "SWIPE FOR SCORECARD", TextSize::Small,
-                  TextAlign::Center, false, DIM_INK);
+                  TextAlign::Center, false, INK_DIM);
   drawBottomBack();
 }
 
@@ -409,20 +424,22 @@ void drawHoleReview(const GolfRound& round) {
   hitTester.add(previous, Action::Previous);
   hitTester.add(next, Action::Next);
   canvas.fillRect(0, 188, PgmCanvas::WIDTH, 2);
-  canvas.drawMonoText(PgmCanvas::WIDTH / 2, 230, view.context, TextSize::Small, TextAlign::Center,
-                      false, DIM_INK);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 355, view.hero, TextSize::Display, TextAlign::Center);
+  const Rect hero{0, 190, PgmCanvas::WIDTH, 390};
+  canvas.drawMonoText(PgmCanvas::WIDTH / 2, hero.y + 66, view.context, TextSize::Small,
+                      TextAlign::Center, false, INK_DIM);
+  canvas.drawText(PgmCanvas::WIDTH / 2,
+                  hero.y + (hero.height - canvas.lineHeight(TextSize::Display)) / 2 + 34,
+                  view.hero, TextSize::Display, TextAlign::Center);
   static constexpr char LABELS[3][20] = {"PUTTS", "INSIDE 100", "TO SCORE ZONE"};
   const char* values[3] = {view.putts, view.in100, view.zone};
   for (uint8_t row = 0; row < 3; ++row) {
     const int y = 600 + row * 155;
     canvas.fillRect(80, y, PgmCanvas::WIDTH - 160, 2);
-    canvas.drawText(100, y + 47, LABELS[row], TextSize::Small, TextAlign::Left, false, DIM_INK);
-    canvas.drawText(PgmCanvas::WIDTH - 100, y + 33, values[row], TextSize::Body, TextAlign::Right);
+    drawPair({52, y, PgmCanvas::WIDTH - 104, 155}, LABELS[row], values[row], TextSize::Body);
   }
   if (view.hasPenalty) canvas.drawText(PgmCanvas::WIDTH / 2, 1080, view.penalty, TextSize::Body, TextAlign::Center);
   if (view.marks[0] != '\0') canvas.drawText(PgmCanvas::WIDTH / 2, 1165, view.marks, TextSize::Small,
-                                             TextAlign::Center, false, DIM_INK);
+                                             TextAlign::Center, false, INK_DIM);
   drawBottomBack();
 }
 
@@ -436,8 +453,8 @@ void drawFinishConfirmation(const GolfRound& round) {
     if (toPar == 0) snprintf(detail, sizeof(detail), "Thru %u, E.", golfThru(round, score));
     else snprintf(detail, sizeof(detail), "Thru %u, %+d.", golfThru(round, score), toPar);
   } else snprintf(detail, sizeof(detail), "Thru %u, score %u.", golfThru(round, score), golfScore(round, score));
-  canvas.drawText(PgmCanvas::WIDTH / 2, 270, "FINISH THIS ROUND?", TextSize::Display, TextAlign::Center);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 410, detail, TextSize::Body, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 246, "FINISH THIS ROUND?", TextSize::Display, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 396, detail, TextSize::Body, TextAlign::Center);
   const Rect no{36, 650, 490, 220};
   const Rect yes{546, 650, 490, 220};
   canvas.drawRect(no.x, no.y, no.width, no.height, 2);
@@ -453,7 +470,8 @@ void drawSummary(const GolfRound& round) {
   hitTester.clear();
   canvas.clear();
   drawViewHeader(view.header, "", view.player, view.playerCount > 1);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 190, view.score, TextSize::Display, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 206, view.score, TextSize::Display, TextAlign::Center);
+  canvas.fillRect(420, 328, 232, 5);
   static constexpr char LABELS[7][18] = {"TO PAR", "PUTTS", "INSIDE 100", "LONG GAME", "PENALTIES",
                                          "FAIRWAYS", "GREENS"};
   const char* values[7] = {view.toPar, view.putts, view.in100, view.longGame, view.penalties,
@@ -463,14 +481,15 @@ void drawSummary(const GolfRound& round) {
   for (uint8_t index = first; index < 7; ++index, ++shown) {
     const uint8_t col = shown % 2;
     const uint8_t row = shown / 2;
-    const Rect cell{36 + col * 510, 410 + row * 190, 490, 170};
-    canvas.drawRect(cell.x, cell.y, cell.width, cell.height, 2);
-    canvas.drawText(cell.x + 24, cell.y + 24, LABELS[index], TextSize::Small, TextAlign::Left, false, DIM_INK);
-    canvas.drawText(cell.x + cell.width - 24, cell.y + 76, values[index], TextSize::Body, TextAlign::Right);
+    const Rect cell{36 + col * 510, 400 + row * 190, 490, 170};
+    if (row != 0) canvas.fillRect(cell.x, cell.y, cell.width, 2);
+    if (col != 0) canvas.fillRect(cell.x, cell.y + 22, 2, cell.height - 44);
+    drawPair({cell.x - 24, cell.y, cell.width + 48, cell.height}, LABELS[index], values[index],
+             TextSize::Body);
   }
   char saved[160];
   snprintf(saved, sizeof(saved), "Saved to rounds/%s.", archivedFilename);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 1190, saved, TextSize::Small, TextAlign::Center, false, DIM_INK);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 1190, saved, TextSize::Small, TextAlign::Center, false, INK_DIM);
   const Rect done{0, 1300, PgmCanvas::WIDTH, 148};
   canvas.fillRect(done.x, done.y, done.width, done.height);
   drawCentered(done, "DONE", TextSize::Body, true);
@@ -480,16 +499,16 @@ void drawSummary(const GolfRound& round) {
 void drawArchiveError() {
   hitTester.clear();
   canvas.clear();
-  canvas.drawText(PgmCanvas::WIDTH / 2, 300, "COULDN'T SAVE THE ROUND", TextSize::Display, TextAlign::Center);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 440, "It's still open.", TextSize::Body, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 270, "COULDN'T SAVE THE ROUND", TextSize::Display, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 430, "It's still open.", TextSize::Body, TextAlign::Center);
   drawBottomBack("<  BACK TO SCORING");
 }
 
 void drawAbandonConfirmation() {
   hitTester.clear();
   canvas.clear();
-  canvas.drawText(PgmCanvas::WIDTH / 2, 270, "ABANDON ROUND?", TextSize::Display, TextAlign::Center);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 390, "This clears the current scorecard.", TextSize::Body,
+  canvas.drawText(PgmCanvas::WIDTH / 2, 246, "ABANDON ROUND?", TextSize::Display, TextAlign::Center);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 396, "This clears the current scorecard.", TextSize::Body,
                   TextAlign::Center);
   const Rect no{36, 650, 490, 220};
   const Rect yes{546, 650, 490, 220};

@@ -5,10 +5,10 @@
 #include <string.h>
 
 #include "store/GolfPaths.h"
+#include "UiStyle.h"
 
 namespace {
 
-constexpr uint8_t DIM = 128;
 constexpr int HEADER_HEIGHT = 150;
 constexpr int FOOTER_Y = 1248;
 
@@ -69,7 +69,9 @@ void drawHome(PgmCanvas& canvas, HitTester& hits, const HomeSummary& summary) {
   const Rect bottom{0, top.height, PgmCanvas::WIDTH, PgmCanvas::HEIGHT - top.height};
   canvas.fillRect(top.x, top.y, top.width, top.height);
   canvas.fillRect(0, top.height, PgmCanvas::WIDTH, 3);
-  canvas.drawText(54, 244, "NEW ROUND", TextSize::Display, TextAlign::Left, true);
+  constexpr int LABEL_Y = 274;
+  constexpr int DETAIL_Y = 396;
+  canvas.drawText(54, LABEL_Y, "NEW ROUND", TextSize::Display, TextAlign::Left, true);
   char detail[112];
   if (summary.hasLast) {
     char relative[16];
@@ -77,11 +79,11 @@ void drawHome(PgmCanvas& canvas, HitTester& hits, const HomeSummary& summary) {
     else snprintf(relative, sizeof(relative), "%+d", summary.lastToPar);
     snprintf(detail, sizeof(detail), "Last · %s · %u (%s)", summary.lastCourse, summary.lastScore, relative);
   } else copyText(detail, sizeof(detail), "No rounds yet");
-  canvas.drawText(56, 350, detail, TextSize::Small, TextAlign::Left, false, 180);
-  canvas.drawText(54, bottom.y + 244, "HISTORY", TextSize::Display);
+  canvas.drawText(56, DETAIL_Y, detail, TextSize::Small, TextAlign::Left, false, INK_GHOST);
+  canvas.drawText(54, bottom.y + LABEL_Y, "HISTORY", TextSize::Display);
   if (summary.rounds == 0) copyText(detail, sizeof(detail), "No rounds yet");
   else snprintf(detail, sizeof(detail), "%u rounds recorded", summary.rounds);
-  canvas.drawText(56, bottom.y + 350, detail, TextSize::Small, TextAlign::Left, false, DIM);
+  canvas.drawText(56, bottom.y + DETAIL_Y, detail, TextSize::Small, TextAlign::Left, false, INK_DIM);
   hits.add(top, SetupNewRound);
   hits.add(bottom, SetupHistory);
 }
@@ -93,15 +95,18 @@ void drawCourses(PgmCanvas& canvas, HitTester& hits) {
     const Course& course = GOLF_BUILT_IN_COURSES[index];
     const Rect row{0, HEADER_HEIGHT + index * rowHeight, PgmCanvas::WIDTH, rowHeight};
     canvas.fillRect(34, row.y + row.height - 2, PgmCanvas::WIDTH - 68, 2);
-    canvas.drawText(48, row.y + 50, course.name, TextSize::Body);
+    const int bodyY = row.y + (row.height - canvas.lineHeight(TextSize::Body)) / 2;
+    canvas.drawText(48, bodyY - 28, course.name, TextSize::Body);
     char tees[64];
     char subtitle[96];
     courseTeeSummary(course, tees, sizeof(tees));
     snprintf(subtitle, sizeof(subtitle), "%u holes · %s", course.holeCount, tees);
-    canvas.drawText(48, row.y + 132, subtitle, TextSize::Small, TextAlign::Left, false, DIM);
+    canvas.drawText(48, bodyY + 40, subtitle, TextSize::Small, TextAlign::Left, false, INK_DIM);
     char par[8];
     courseParLabel(course, par, sizeof(par));
-    canvas.drawText(PgmCanvas::WIDTH - 50, row.y + 75, par, TextSize::Display, TextAlign::Right);
+    canvas.drawText(PgmCanvas::WIDTH - 50,
+                    row.y + (row.height - canvas.lineHeight(TextSize::Display)) / 2,
+                    par, TextSize::Display, TextAlign::Right);
     hits.add(row, SetupCourseFirst + index);
   }
 }
@@ -135,18 +140,19 @@ void drawRoster(PgmCanvas& canvas, HitTester& hits, const SetupState& setup) {
     const Rect row{0, HEADER_HEIGHT + index * rowHeight, PgmCanvas::WIDTH, rowHeight};
     char number[4];
     snprintf(number, sizeof(number), "%u", index + 1);
-    canvas.drawText(48, row.y + 55, number, TextSize::Body);
-    canvas.drawText(128, row.y + 42, setup.playerName[index], TextSize::Body);
+    const int groupY = row.y + (row.height - 102) / 2;
+    canvas.drawText(48, groupY, number, TextSize::Body);
+    canvas.drawText(128, groupY, setup.playerName[index], TextSize::Body);
     const uint8_t tee = setup.teeIndex[index];
     char detail[64];
     snprintf(detail, sizeof(detail), "%s · %u yds", setup.course->tees[tee].name,
              courseTeeYards(*setup.course, tee));
-    canvas.drawText(128, row.y + 122, detail, TextSize::Small, TextAlign::Left, false, DIM);
+    canvas.drawText(128, groupY + 67, detail, TextSize::Small, TextAlign::Left, false, INK_DIM);
     canvas.fillRect(34, row.y + row.height - 2, PgmCanvas::WIDTH - 68, 2);
     hits.add(row, SetupPlayerFirst + index);
   }
   canvas.drawText(PgmCanvas::WIDTH / 2, 1088, "Tap a player to change name or tee", TextSize::Small,
-                  TextAlign::Center, false, DIM);
+                  TextAlign::Center, false, INK_DIM);
   footer(canvas, hits, "START ROUND");
 }
 
@@ -156,12 +162,14 @@ void drawEdit(PgmCanvas& canvas, HitTester& hits, const SetupState& setup) {
   canvas.drawText(48, 220, setup.playerName[player], TextSize::Display);
   const Rect name{0, 390, PgmCanvas::WIDTH, 220};
   const Rect tee{0, 610, PgmCanvas::WIDTH, 220};
-  canvas.drawText(48, name.y + 68, "Name", TextSize::Body);
-  canvas.drawText(PgmCanvas::WIDTH - 48, name.y + 68, setup.playerName[player], TextSize::Body,
-                  TextAlign::Right, false, DIM);
-  canvas.drawText(48, tee.y + 68, "Tee", TextSize::Body);
-  canvas.drawText(PgmCanvas::WIDTH - 48, tee.y + 68, setup.course->tees[setup.teeIndex[player]].name,
-                  TextSize::Body, TextAlign::Right, false, DIM);
+  const int nameY = name.y + (name.height - canvas.lineHeight(TextSize::Body)) / 2;
+  const int teeY = tee.y + (tee.height - canvas.lineHeight(TextSize::Body)) / 2;
+  canvas.drawText(48, nameY, "Name", TextSize::Body);
+  canvas.drawText(PgmCanvas::WIDTH - 48, nameY, setup.playerName[player], TextSize::Body,
+                  TextAlign::Right);
+  canvas.drawText(48, teeY, "Tee", TextSize::Body);
+  canvas.drawText(PgmCanvas::WIDTH - 48, teeY, setup.course->tees[setup.teeIndex[player]].name,
+                  TextSize::Body, TextAlign::Right);
   canvas.fillRect(34, name.y + name.height - 2, PgmCanvas::WIDTH - 68, 2);
   canvas.fillRect(34, tee.y + tee.height - 2, PgmCanvas::WIDTH - 68, 2);
   hits.add(name, SetupEditName);
@@ -172,10 +180,12 @@ void drawTees(PgmCanvas& canvas, HitTester& hits, const SetupState& setup) {
   header(canvas, hits, "CHOOSE TEE");
   for (uint8_t index = 0; index < setup.course->teeCount; ++index) {
     const Rect row{0, HEADER_HEIGHT + index * 230, PgmCanvas::WIDTH, 230};
-    canvas.drawText(48, row.y + 68, setup.course->tees[index].name, TextSize::Body);
+    const int textY = row.y + (row.height - canvas.lineHeight(TextSize::Body)) / 2;
+    canvas.drawText(48, textY, setup.course->tees[index].name, TextSize::Body);
     char yards[32];
     snprintf(yards, sizeof(yards), "%u yds", courseTeeYards(*setup.course, index));
-    canvas.drawText(PgmCanvas::WIDTH - 48, row.y + 68, yards, TextSize::Body, TextAlign::Right, false, DIM);
+    canvas.drawText(PgmCanvas::WIDTH - 48, textY, yards, TextSize::Body, TextAlign::Right,
+                    false, INK_DIM);
     canvas.fillRect(34, row.y + row.height - 2, PgmCanvas::WIDTH - 68, 2);
     hits.add(row, SetupTeeFirst + index);
   }

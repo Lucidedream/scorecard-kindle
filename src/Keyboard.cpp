@@ -24,7 +24,7 @@ void key(PgmCanvas& canvas, HitTester& hits, const Rect rect, const char* label,
 void letterRow(PgmCanvas& canvas, HitTester& hits, const KeyboardState& state, const char* letters,
                const int count, const int y, const int left, const int width) {
   for (int index = 0; index < count; ++index) {
-    const Rect rect{left + index * width, y, width - 6, 190};
+    const Rect rect{left + index * width, y, width - 6, 206};
     char label[2] = {letters[index], '\0'};
     if (!state.shift) label[0] = static_cast<char>(label[0] + ('a' - 'A'));
     key(canvas, hits, rect, label, KeyboardLetterFirst + letters[index] - 'A');
@@ -42,19 +42,19 @@ void initializeKeyboard(KeyboardState& state, const char* initial) {
 void drawKeyboard(PgmCanvas& canvas, HitTester& hits, const KeyboardState& state) {
   canvas.clear();
   hits.clear();
-  canvas.drawText(46, 58, "EDIT NAME", TextSize::Small);
-  canvas.drawRect(36, 125, 1000, 180, 3);
-  canvas.drawText(62, 174, state.text, TextSize::Body);
+  canvas.drawText(46, 38, "EDIT NAME", TextSize::Small);
+  canvas.drawRect(36, 96, 1000, 218, 3);
+  canvas.drawText(62, 178, state.text, TextSize::Body);
   const int caretX = 66 + canvas.measureText(state.text, TextSize::Body);
-  canvas.fillRect(caretX, 170, 4, canvas.lineHeight(TextSize::Body));
+  canvas.fillRect(caretX, 174, 4, canvas.lineHeight(TextSize::Body));
 
   letterRow(canvas, hits, state, "QWERTYUIOP", 10, 350, 16, 105);
-  letterRow(canvas, hits, state, "ASDFGHJKL", 9, 555, 68, 105);
-  key(canvas, hits, {16, 760, 150, 190}, "SHIFT", KeyboardShift, state.shift);
-  letterRow(canvas, hits, state, "ZXCVBNM", 7, 760, 172, 105);
-  key(canvas, hits, {913, 760, 143, 190}, "DEL", KeyboardBackspace);
-  key(canvas, hits, {16, 990, 690, 210}, "SPACE", KeyboardSpace);
-  key(canvas, hits, {722, 990, 334, 210}, "DONE", KeyboardDone, true);
+  letterRow(canvas, hits, state, "ASDFGHJKL", 9, 574, 68, 105);
+  key(canvas, hits, {16, 798, 150, 206}, "SHIFT", KeyboardShift, state.shift);
+  letterRow(canvas, hits, state, "ZXCVBNM", 7, 798, 172, 105);
+  key(canvas, hits, {913, 798, 143, 206}, "DEL", KeyboardBackspace);
+  key(canvas, hits, {16, 1022, 690, 410}, "SPACE", KeyboardSpace);
+  key(canvas, hits, {722, 1022, 334, 410}, "DONE", KeyboardDone, true);
 }
 
 bool handleKeyboardAction(KeyboardState& state, const int action, const TouchEvent::Kind kind) {

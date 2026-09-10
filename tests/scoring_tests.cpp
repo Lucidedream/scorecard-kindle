@@ -3,6 +3,7 @@
 
 #include "MarkSheet.h"
 #include "ScoringScreen.h"
+#include "UiStyle.h"
 #include "core/Course.h"
 #include "core/GolfStats.h"
 #include "store/RoundStore.h"
@@ -21,6 +22,7 @@ void testLayout() {
   assert(putts.header.height == 108);
   assert(putts.holeStrip.height >= 90 && putts.previous.width >= 132 && putts.previous.height >= 132);
   assert(putts.metrics[0].height > putts.metrics[1].height);
+  assert(putts.metrics[0].height * 10 >= putts.metrics[1].height * 16);
   assert(putts.metrics[0].y == putts.context.y + putts.context.height);
   assert(putts.metrics[2].y + putts.metrics[2].height == putts.totals.y);
   assert(putts.footer.y + putts.footer.height == 1448);
@@ -32,6 +34,7 @@ void testLayout() {
   assert(mark.scrim.y == 0 && mark.sheet.y == mark.scrim.height);
   assert(mark.hazardMinus.width >= 130 && mark.hazardPlus.height >= 130);
   assert(mark.done.y + mark.done.height <= 1448);
+  assert(INK_DIM % 17 == 0 && INK_GHOST % 17 == 0 && INK_HAIRLINE % 17 == 0);
 }
 
 void testSeededAndLoggedView() {

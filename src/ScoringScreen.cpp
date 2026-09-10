@@ -60,7 +60,7 @@ ScoringLayout scoringLayout(const GolfField focused) {
 
   const int metricTop = layout.context.y + layout.context.height;
   const int metricHeight = layout.totals.y - metricTop;
-  constexpr int NORMAL_HEIGHT = 270;
+  constexpr int NORMAL_HEIGHT = 230;
   const int focusedHeight = metricHeight - 2 * NORMAL_HEIGHT;
   int y = metricTop;
   for (uint8_t index = 0; index < 3; ++index) {
