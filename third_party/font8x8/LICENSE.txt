@@ -1,6 +1,0 @@
-font8x8 by Daniel Hepper is dedicated to the public domain.
-
-The bitmap data is based on public-domain IBM VGA fonts. The upstream source is:
-https://github.com/dhepper/font8x8
-
-The upstream headers identify the work as "License: Public Domain".

@@ -1,6 +1,8 @@
 #include "HitTester.h"
+#include "Keyboard.h"
 #include "PgmCanvas.h"
 #include "ScoringScreen.h"
+#include "SetupScreens.h"
 #include "TouchInput.h"
 #include "core/Course.h"
 #include "store/RoundStore.h"
@@ -35,7 +37,8 @@ enum Action {
   ConfirmYes,
 };
 
-enum class Screen { Scoring, Menu, ConfirmAbandon, NoRound };
+enum class Screen { Home, History, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
+                    ConfirmAbandon };
 
 PgmCanvas canvas;
 HitTester hitTester;
@@ -194,21 +197,34 @@ void drawAbandonConfirmation() {
   hitTester.add(yes, Action::ConfirmYes);
 }
 
-void drawNoRound() {
-  hitTester.clear();
-  canvas.clear();
-  canvas.drawText(PgmCanvas::WIDTH / 2, 560, "NO ROUND", TextSize::Display, TextAlign::Center);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 690, "Start a new round after setup is added.", TextSize::Body,
-                  TextAlign::Center, false, DIM_INK);
+SetupScreen setupScreen(const Screen screen) {
+  switch (screen) {
+    case Screen::Home: return SetupScreen::Home;
+    case Screen::History: return SetupScreen::History;
+    case Screen::Courses: return SetupScreen::Courses;
+    case Screen::PlayerCount: return SetupScreen::PlayerCount;
+    case Screen::Roster: return SetupScreen::Roster;
+    case Screen::EditPlayer: return SetupScreen::EditPlayer;
+    case Screen::TeeList: return SetupScreen::TeeList;
+    default: return SetupScreen::Home;
+  }
 }
 
 bool paint(const char* path, const Screen screen, const GolfRound& round, const GolfField focused,
+           const SetupState& setup, const HomeSummary& home, const KeyboardState& keyboard,
            const bool showOnDevice, const bool fullRefresh) {
   switch (screen) {
+    case Screen::Home:
+    case Screen::History:
+    case Screen::Courses:
+    case Screen::PlayerCount:
+    case Screen::Roster:
+    case Screen::EditPlayer:
+    case Screen::TeeList: drawSetupScreen(canvas, hitTester, setupScreen(screen), setup, home); break;
+    case Screen::Keyboard: drawKeyboard(canvas, hitTester, keyboard); break;
     case Screen::Scoring: drawScoring(round, focused); break;
     case Screen::Menu: drawMenu(); break;
     case Screen::ConfirmAbandon: drawAbandonConfirmation(); break;
-    case Screen::NoRound: drawNoRound(); break;
   }
   if (!canvas.write(path)) return false;
   if (!showOnDevice) return true;
@@ -221,10 +237,10 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
   return system(command) == 0;
 }
 
-bool paintDevice(const Screen screen, const GolfRound& round, const GolfField focused, const bool forceGc,
+bool paintDevice(const Screen screen, const GolfRound& round, const GolfField focused, const SetupState& setup,
+                 const HomeSummary& home, const KeyboardState& keyboard, const bool fullRefresh,
                  unsigned int& paints) {
-  const bool fullRefresh = forceGc || paints == 0 || paints % 8 == 0;
-  if (!paint(SCREEN_PATH, screen, round, focused, true, fullRefresh)) return false;
+  if (!paint(SCREEN_PATH, screen, round, focused, setup, home, keyboard, true, fullRefresh)) return false;
   ++paints;
   return true;
 }
@@ -239,20 +255,55 @@ void makeGoldenRound(GolfRound& round) {
   round.currentHole = 6;
 }
 
+bool startSetupRound(const SetupState& setup, GolfRound& round) {
+  if (!buildRoundFromSetup(setup, round)) return false;
+  const time_t raw = time(nullptr);
+  const tm* date = localtime(&raw);
+  if (date != nullptr) {
+    round.dateYmd = static_cast<uint16_t>(((date->tm_year - 100) << 9) |
+                                          ((date->tm_mon + 1) << 5) | date->tm_mday);
+  }
+  return RoundStore::write(round);
+}
+
 }  // namespace
 
 int main(const int argc, char** argv) {
   if (argc == 2 && strcmp(argv[1], "--selftest") == 0) return selfTest() ? 0 : 1;
   if (argc == 3 && strcmp(argv[1], "--render") == 0) {
     GolfRound round{};
+    SetupState setup{};
+    HomeSummary home{};
+    KeyboardState keyboard{};
+    initializeSetup(setup);
+    initializeKeyboard(keyboard, "Noah");
     makeGoldenRound(round);
-    return paint(argv[2], Screen::Scoring, round, GolfField::Putts, false, true) ? 0 : 1;
+    return paint(argv[2], Screen::Scoring, round, GolfField::Putts, setup, home, keyboard, false, true) ? 0 : 1;
+  }
+  if (argc == 4 && strcmp(argv[1], "--render") == 0) {
+    GolfRound round{};
+    SetupState setup{};
+    HomeSummary home{};
+    KeyboardState keyboard{};
+    initializeSetup(setup);
+    initializeKeyboard(keyboard, "Noah");
+    makeGoldenRound(round);
+    Screen screen = Screen::Home;
+    if (strcmp(argv[2], "keyboard") == 0) screen = Screen::Keyboard;
+    else if (strcmp(argv[2], "scoring") == 0) screen = Screen::Scoring;
+    else if (strcmp(argv[2], "home") != 0) return 2;
+    return paint(argv[3], screen, round, GolfField::Putts, setup, home, keyboard, false, true) ? 0 : 1;
   }
 
   GolfRound round{};
-  if (RoundStore::read(round).status != GolfJsonStatus::Ok) makeDefaultRound(round);
+  const bool hasRound = RoundStore::read(round).status == GolfJsonStatus::Ok;
+  SetupState setup{};
+  HomeSummary home{};
+  KeyboardState keyboard{};
+  initializeSetup(setup);
+  readHomeSummary(home);
   GolfField focused = GolfField::Putts;
-  Screen screen = Screen::Scoring;
+  Screen screen = hasRound ? Screen::Scoring : Screen::Home;
   TouchInput input;
   if (!input.openDevice()) {
     fprintf(stderr, "Could not find the Kindle touchscreen\n");
@@ -268,7 +319,7 @@ int main(const int argc, char** argv) {
   unsigned int paints = 0;
   bool counterDirty = false;
   uint64_t counterChangedAt = 0;
-  if (!paintDevice(screen, round, focused, true, paints)) return 3;
+  if (!paintDevice(screen, round, focused, setup, home, keyboard, true, paints)) return 3;
   while (true) {
     int timeout = -1;
     if (counterDirty) {
@@ -288,7 +339,92 @@ int main(const int argc, char** argv) {
 
     bool repaint = false;
     bool forceGc = false;
-    if (screen == Screen::Scoring) {
+    if (screen == Screen::Home && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupNewRound) {
+        initializeSetup(setup);
+        screen = Screen::Courses;
+        repaint = true;
+        forceGc = true;
+      } else if (action == SetupHistory) {
+        screen = Screen::History;
+        repaint = true;
+        forceGc = true;
+      }
+    } else if (screen == Screen::History && event.kind == TouchEvent::Kind::Tap && action == SetupBack) {
+      screen = Screen::Home;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::Courses && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupBack) {
+        screen = Screen::Home;
+        repaint = true;
+        forceGc = true;
+      } else if (action >= SetupCourseFirst && action < SetupCourseFirst + GOLF_BUILT_IN_COURSE_COUNT) {
+        setup.course = &GOLF_BUILT_IN_COURSES[action - SetupCourseFirst];
+        for (uint8_t player = 0; player < GOLF_MAX_PLAYERS; ++player) setup.teeIndex[player] = 0;
+        screen = Screen::PlayerCount;
+        repaint = true;
+        forceGc = true;
+      }
+    } else if (screen == Screen::PlayerCount && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupBack) {
+        screen = Screen::Courses;
+        repaint = true;
+        forceGc = true;
+      } else if (action == SetupCountMinus || action == SetupCountPlus) {
+        setup.playerCount = stepPlayerCount(setup.playerCount, action == SetupCountMinus ? -1 : 1);
+        repaint = true;
+      } else if (action == SetupPrimary) {
+        if (playerCountSkipsRoster(setup.playerCount)) {
+          if (startSetupRound(setup, round)) {
+            screen = Screen::Scoring;
+            focused = GolfField::Putts;
+          }
+        } else screen = Screen::Roster;
+        repaint = true;
+        forceGc = true;
+      }
+    } else if (screen == Screen::Roster && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupBack) {
+        screen = Screen::PlayerCount;
+      } else if (action == SetupPrimary) {
+        if (startSetupRound(setup, round)) {
+          screen = Screen::Scoring;
+          focused = GolfField::Putts;
+        }
+      } else if (action >= SetupPlayerFirst && action < SetupPlayerFirst + setup.playerCount) {
+        setup.editPlayer = static_cast<uint8_t>(action - SetupPlayerFirst);
+        screen = Screen::EditPlayer;
+      }
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::EditPlayer && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupBack) screen = Screen::Roster;
+      else if (action == SetupEditName) {
+        initializeKeyboard(keyboard, setup.playerName[setup.editPlayer]);
+        screen = Screen::Keyboard;
+      } else if (action == SetupEditTee) screen = Screen::TeeList;
+      else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::TeeList && event.kind == TouchEvent::Kind::Tap) {
+      if (action == SetupBack) screen = Screen::EditPlayer;
+      else if (action >= SetupTeeFirst && action < SetupTeeFirst + setup.course->teeCount) {
+        setup.teeIndex[setup.editPlayer] = static_cast<uint8_t>(action - SetupTeeFirst);
+        screen = Screen::EditPlayer;
+      } else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::Keyboard) {
+      if (handleKeyboardAction(keyboard, action, event.kind)) {
+        if (keyboard.finished) {
+          finishKeyboard(keyboard, setup.playerName[setup.editPlayer], sizeof(setup.playerName[setup.editPlayer]));
+          screen = Screen::EditPlayer;
+          forceGc = true;
+        }
+        repaint = true;
+      }
+    } else if (screen == Screen::Scoring) {
       const bool forward = event.kind == TouchEvent::Kind::SwipeRight ||
                            (event.kind == TouchEvent::Kind::Tap && action == Action::Next);
       const bool backward = event.kind == TouchEvent::Kind::SwipeLeft ||
@@ -341,13 +477,13 @@ int main(const int argc, char** argv) {
         repaint = true;
         forceGc = true;
       } else if (action == Action::ConfirmYes) {
-        RoundStore::write(round);
         RoundStore::clear();
-        screen = Screen::NoRound;
+        readHomeSummary(home);
+        screen = Screen::Home;
         repaint = true;
         forceGc = true;
       }
     }
-    if (repaint && !paintDevice(screen, round, focused, forceGc, paints)) return 3;
+    if (repaint && !paintDevice(screen, round, focused, setup, home, keyboard, forceGc, paints)) return 3;
   }
 }

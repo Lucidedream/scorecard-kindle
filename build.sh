@@ -26,6 +26,8 @@ fi
   "$SCRIPT_DIR/src/main.cpp" \
   "$SCRIPT_DIR/src/PgmCanvas.cpp" \
   "$SCRIPT_DIR/src/ScoringScreen.cpp" \
+  "$SCRIPT_DIR/src/SetupScreens.cpp" \
+  "$SCRIPT_DIR/src/Keyboard.cpp" \
   "$SCRIPT_DIR/src/TouchInput.cpp" \
   "$SCRIPT_DIR/src/core/Course.cpp" \
   "$SCRIPT_DIR/src/core/GolfRules.cpp" \
