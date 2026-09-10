@@ -14,12 +14,14 @@ TouchEvent classify(const uint64_t duration, const int upX, const int upY) {
 }
 
 void testGestures() {
-  assert(classify(100, 205, 304).kind == TouchEvent::Kind::Tap);
+  const TouchEvent tap = classify(100, 205, 304);
+  assert(tap.kind == TouchEvent::Kind::Tap && tap.durationMs == 100);
   assert(classify(100, 340, 300).kind == TouchEvent::Kind::Tap);
   assert(classify(100, 341, 370).kind == TouchEvent::Kind::SwipeRight);
   assert(classify(100, 59, 230).kind == TouchEvent::Kind::SwipeLeft);
   assert(classify(450, 200, 300).kind == TouchEvent::Kind::Tap);
-  assert(classify(451, 239, 300).kind == TouchEvent::Kind::LongPress);
+  const TouchEvent hold = classify(851, 239, 300);
+  assert(hold.kind == TouchEvent::Kind::LongPress && hold.durationMs == 851);
   assert(classify(451, 240, 300).kind == TouchEvent::Kind::Tap);
 
   GestureClassifier wandering;
@@ -48,6 +50,7 @@ void testTextMetrics() {
   assert(canvas.measureText("iiii", TextSize::Body) < canvas.measureText("WWWW", TextSize::Body));
   assert(canvas.measureText("W", TextSize::Small) < canvas.measureText("W", TextSize::Display));
   assert(canvas.measureText("Café £12", TextSize::Small) > 0);
+  canvas.drawMonoText(10, 10, "425 YD · SI 3", TextSize::Small);
 }
 
 void testAntialiasing() {

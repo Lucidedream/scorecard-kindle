@@ -25,6 +25,7 @@ fi
   -I"$SCRIPT_DIR/src/core" \
   "$SCRIPT_DIR/src/main.cpp" \
   "$SCRIPT_DIR/src/PgmCanvas.cpp" \
+  "$SCRIPT_DIR/src/ScoringScreen.cpp" \
   "$SCRIPT_DIR/src/TouchInput.cpp" \
   "$SCRIPT_DIR/src/core/Course.cpp" \
   "$SCRIPT_DIR/src/core/GolfRules.cpp" \

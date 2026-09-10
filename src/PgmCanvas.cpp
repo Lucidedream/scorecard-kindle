@@ -55,11 +55,11 @@ void PgmCanvas::setPixel(const int x, const int y, const bool black) {
   pixels[static_cast<size_t>(y * WIDTH + x)] = black ? 0x00 : 0xFF;
 }
 
-void PgmCanvas::blendPixel(const int x, const int y, const uint8_t coverage, const bool black) {
+void PgmCanvas::blendPixel(const int x, const int y, const uint8_t coverage, const uint8_t shade) {
   if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT || coverage == 0) return;
   const size_t index = static_cast<size_t>(y * WIDTH + x);
   const int background = pixels[index];
-  const int foreground = black ? 0 : 255;
+  const int foreground = shade;
   pixels[index] = static_cast<uint8_t>((background * (255 - coverage) + foreground * coverage + 127) / 255);
 }
 
@@ -81,7 +81,7 @@ void PgmCanvas::drawRect(const int x, const int y, const int width, const int he
 }
 
 void PgmCanvas::drawGlyph(const int x, const int y, const uint32_t codepoint, const TextSize size,
-                          const bool black) {
+                          const uint8_t shade) {
   const font_data::Glyph& glyph = glyphFor(codepoint, size);
   const font_data::Metrics& metrics = font_data::METRICS[sizeIndex(size)];
   const int left = x + glyph.leftBearing;
@@ -90,7 +90,7 @@ void PgmCanvas::drawGlyph(const int x, const int y, const uint32_t codepoint, co
   for (int pixel = 0; pixel < pixelCount; ++pixel) {
     const uint8_t packed = font_data::BITMAP[glyph.bitmapOffset + static_cast<unsigned int>(pixel / 2)];
     const uint8_t coverage = static_cast<uint8_t>((pixel % 2 == 0 ? packed >> 4 : packed & 0x0F) * 17);
-    blendPixel(left + pixel % glyph.width, top + pixel / glyph.width, coverage, black);
+    blendPixel(left + pixel % glyph.width, top + pixel / glyph.width, coverage, shade);
   }
 }
 
@@ -107,7 +107,7 @@ int PgmCanvas::lineHeight(const TextSize size) const {
 }
 
 void PgmCanvas::drawText(int x, const int y, const char* utf8, const TextSize size, const TextAlign align,
-                         const bool inverted) {
+                         const bool inverted, const uint8_t shade) {
   if (utf8 == nullptr) return;
   const int width = measureText(utf8, size);
   if (align == TextAlign::Center) x -= width / 2;
@@ -116,8 +116,28 @@ void PgmCanvas::drawText(int x, const int y, const char* utf8, const TextSize si
   for (const char* cursor = utf8; *cursor != '\0';) {
     const uint32_t codepoint = nextCodepoint(cursor);
     const font_data::Glyph& glyph = glyphFor(codepoint, size);
-    drawGlyph(x, y, codepoint, size, !inverted);
+    drawGlyph(x, y, codepoint, size, inverted ? 255 : shade);
     x += glyph.xAdvance;
+  }
+}
+
+void PgmCanvas::drawMonoText(int x, const int y, const char* utf8, const TextSize size,
+                             const TextAlign align, const bool inverted, const uint8_t shade) {
+  if (utf8 == nullptr) return;
+  int count = 0;
+  for (const char* cursor = utf8; *cursor != '\0';) {
+    nextCodepoint(cursor);
+    ++count;
+  }
+  const int advance = glyphFor('0', size).xAdvance + 2;
+  const int width = count * advance;
+  if (align == TextAlign::Center) x -= width / 2;
+  if (align == TextAlign::Right) x -= width;
+  for (const char* cursor = utf8; *cursor != '\0';) {
+    const uint32_t codepoint = nextCodepoint(cursor);
+    const font_data::Glyph& glyph = glyphFor(codepoint, size);
+    drawGlyph(x + (advance - glyph.xAdvance) / 2, y, codepoint, size, inverted ? 255 : shade);
+    x += advance;
   }
 }
 

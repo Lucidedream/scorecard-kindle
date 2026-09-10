@@ -27,13 +27,15 @@ TouchEvent GestureClassifier::finish(const uint64_t timeMs, const int x, const i
              maximumTravelSquared < LONG_PRESS_TRAVEL * LONG_PRESS_TRAVEL) {
     kind = TouchEvent::Kind::LongPress;
   }
-  return {kind, x, y};
+  const uint64_t duration = timeMs - downTimeMs;
+  return {kind, x, y, static_cast<uint32_t>(duration > UINT32_MAX ? UINT32_MAX : duration)};
 }
 
 #if defined(__linux__)
 
 #include <fcntl.h>
 #include <linux/input.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -134,7 +136,11 @@ bool TouchInput::openDevice() {
 }
 
 bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
-  if (fd < 0) return false;
+  return waitForEvent(touchEvent, -1) == TouchWaitResult::Event;
+}
+
+TouchWaitResult TouchInput::waitForEvent(TouchEvent& touchEvent, const int timeoutMs) {
+  if (fd < 0) return TouchWaitResult::Error;
   int rawX = minX;
   int rawY = minY;
   bool haveX = false;
@@ -143,12 +149,25 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
   bool downPending = false;
   uint64_t downTimeMs = 0;
   GestureClassifier classifier;
+  const uint64_t deadline = timeoutMs < 0 ? 0 : nowMs() + static_cast<uint64_t>(timeoutMs);
 
   while (true) {
+    if (!trackingTouch && timeoutMs >= 0) {
+      const uint64_t now = nowMs();
+      if (now >= deadline) return TouchWaitResult::Timeout;
+      pollfd descriptor{fd, POLLIN, 0};
+      const uint64_t remaining = deadline - now;
+      const int wait = poll(&descriptor, 1, static_cast<int>(remaining > INT32_MAX ? INT32_MAX : remaining));
+      if (wait == 0) return TouchWaitResult::Timeout;
+      if (wait < 0) {
+        if (errno == EINTR) continue;
+        return TouchWaitResult::Error;
+      }
+    }
     input_event event{};
     const ssize_t count = read(fd, &event, sizeof(event));
     if (count < 0 && errno == EINTR) continue;
-    if (count != static_cast<ssize_t>(sizeof(event))) return false;
+    if (count != static_cast<ssize_t>(sizeof(event))) return TouchWaitResult::Error;
 
     if (event.type == EV_ABS) {
       if (event.code == (usesMultitouch ? ABS_MT_POSITION_X : ABS_X)) {
@@ -169,7 +188,7 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
           const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
           if (downPending) classifier.begin(downTimeMs, x, y);
           touchEvent = classifier.finish(nowMs(), x, y);
-          return true;
+          return TouchWaitResult::Event;
         }
       }
     } else if (event.type == EV_KEY && event.code == BTN_TOUCH) {
@@ -182,7 +201,7 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
         const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
         if (downPending) classifier.begin(downTimeMs, x, y);
         touchEvent = classifier.finish(nowMs(), x, y);
-        return true;
+        return TouchWaitResult::Event;
       }
     } else if (event.type == EV_SYN && event.code == SYN_REPORT && haveX && haveY) {
       const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
@@ -195,8 +214,8 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
           classifier.update(x, y);
         }
       } else if (!usesMultitouch && !hasTouchKey) {
-        touchEvent = {TouchEvent::Kind::Tap, x, y};
-        return true;
+        touchEvent = {TouchEvent::Kind::Tap, x, y, 0};
+        return TouchWaitResult::Event;
       }
     }
   }
@@ -207,5 +226,6 @@ bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
 TouchInput::~TouchInput() = default;
 bool TouchInput::openDevice() { return false; }
 bool TouchInput::waitForEvent(TouchEvent&) { return false; }
+TouchWaitResult TouchInput::waitForEvent(TouchEvent&, int) { return TouchWaitResult::Error; }
 
 #endif

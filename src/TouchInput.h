@@ -8,7 +8,10 @@ struct TouchEvent {
   Kind kind;
   int x;
   int y;
+  uint32_t durationMs;
 };
+
+enum class TouchWaitResult { Event, Timeout, Error };
 
 class GestureClassifier {
  public:
@@ -37,6 +40,7 @@ class TouchInput {
 
   bool openDevice();
   bool waitForEvent(TouchEvent& touchEvent);
+  TouchWaitResult waitForEvent(TouchEvent& touchEvent, int timeoutMs);
   const char* deviceName() const { return name; }
 
  private:
