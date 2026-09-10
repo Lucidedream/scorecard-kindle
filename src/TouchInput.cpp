@@ -1,5 +1,35 @@
 #include "TouchInput.h"
 
+#include <stdlib.h>
+
+void GestureClassifier::begin(const uint64_t timeMs, const int x, const int y) {
+  downTimeMs = timeMs;
+  downX = x;
+  downY = y;
+  maximumTravelSquared = 0;
+}
+
+void GestureClassifier::update(const int x, const int y) {
+  const int dx = x - downX;
+  const int dy = y - downY;
+  const int travelSquared = dx * dx + dy * dy;
+  if (travelSquared > maximumTravelSquared) maximumTravelSquared = travelSquared;
+}
+
+TouchEvent GestureClassifier::finish(const uint64_t timeMs, const int x, const int y) {
+  update(x, y);
+  const int dx = x - downX;
+  const int dy = y - downY;
+  TouchEvent::Kind kind = TouchEvent::Kind::Tap;
+  if (abs(dx) > SWIPE_DISTANCE && abs(dx) > 2 * abs(dy)) {
+    kind = dx < 0 ? TouchEvent::Kind::SwipeLeft : TouchEvent::Kind::SwipeRight;
+  } else if (timeMs - downTimeMs > LONG_PRESS_MS &&
+             maximumTravelSquared < LONG_PRESS_TRAVEL * LONG_PRESS_TRAVEL) {
+    kind = TouchEvent::Kind::LongPress;
+  }
+  return {kind, x, y};
+}
+
 #if defined(__linux__)
 
 #include <fcntl.h>
@@ -7,9 +37,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <cerrno>
-#include <cstdio>
-#include <cstring>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
 
 namespace {
 
@@ -30,6 +60,10 @@ int scaleAxis(const int value, const int minimum, const int maximum, const int s
   return scaled;
 }
 
+uint64_t eventTimeMs(const input_event& event) {
+  return static_cast<uint64_t>(event.time.tv_sec) * 1000U + static_cast<uint64_t>(event.time.tv_usec) / 1000U;
+}
+
 }  // namespace
 
 TouchInput::~TouchInput() {
@@ -48,11 +82,11 @@ bool TouchInput::openDevice() {
 
   for (int index = 0; index < 32; ++index) {
     char path[64];
-    std::snprintf(path, sizeof(path), "/dev/input/event%d", index);
+    snprintf(path, sizeof(path), "/dev/input/event%d", index);
     const int candidate = ::open(path, O_RDONLY | O_NONBLOCK);
     if (candidate < 0) continue;
 
-    std::memset(absBits, 0, sizeof(absBits));
+    memset(absBits, 0, sizeof(absBits));
     if (ioctl(candidate, EVIOCGBIT(EV_ABS, sizeof(absBits)), absBits) < 0) {
       close(candidate);
       continue;
@@ -60,7 +94,7 @@ bool TouchInput::openDevice() {
 
     const bool multi = bitIsSet(absBits, ABS_MT_POSITION_X) && bitIsSet(absBits, ABS_MT_POSITION_Y);
     const bool single = bitIsSet(absBits, ABS_X) && bitIsSet(absBits, ABS_Y);
-    std::memset(keyBits, 0, sizeof(keyBits));
+    memset(keyBits, 0, sizeof(keyBits));
     const bool touchKey = ioctl(candidate, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) >= 0 &&
                           bitIsSet(keyBits, BTN_TOUCH);
     if (!multi && !(single && touchKey)) {
@@ -93,13 +127,16 @@ bool TouchInput::openDevice() {
   return false;
 }
 
-bool TouchInput::waitForTap(TouchPoint& point) {
+bool TouchInput::waitForEvent(TouchEvent& touchEvent) {
   if (fd < 0) return false;
   int rawX = minX;
   int rawY = minY;
   bool haveX = false;
   bool haveY = false;
   bool trackingTouch = false;
+  bool downPending = false;
+  uint64_t downTimeMs = 0;
+  GestureClassifier classifier;
 
   while (true) {
     input_event event{};
@@ -117,25 +154,44 @@ bool TouchInput::waitForTap(TouchPoint& point) {
       } else if (usesMultitouch && event.code == ABS_MT_TRACKING_ID) {
         if (event.value >= 0) {
           trackingTouch = true;
+          downPending = true;
+          downTimeMs = eventTimeMs(event);
+          haveX = false;
+          haveY = false;
         } else if (trackingTouch && haveX && haveY) {
-          point.x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
-          point.y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
+          const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
+          const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
+          if (downPending) classifier.begin(downTimeMs, x, y);
+          touchEvent = classifier.finish(eventTimeMs(event), x, y);
           return true;
         }
       }
     } else if (event.type == EV_KEY && event.code == BTN_TOUCH) {
       if (event.value != 0) {
         trackingTouch = true;
+        downPending = true;
+        downTimeMs = eventTimeMs(event);
       } else if (trackingTouch && haveX && haveY) {
-        point.x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
-        point.y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
+        const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
+        const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
+        if (downPending) classifier.begin(downTimeMs, x, y);
+        touchEvent = classifier.finish(eventTimeMs(event), x, y);
         return true;
       }
-    } else if (event.type == EV_SYN && event.code == SYN_REPORT && !usesMultitouch && !hasTouchKey && haveX &&
-               haveY) {
-      point.x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
-      point.y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
-      return true;
+    } else if (event.type == EV_SYN && event.code == SYN_REPORT && haveX && haveY) {
+      const int x = scaleAxis(rawX, minX, maxX, SCREEN_WIDTH);
+      const int y = scaleAxis(rawY, minY, maxY, SCREEN_HEIGHT);
+      if (trackingTouch) {
+        if (downPending) {
+          classifier.begin(downTimeMs, x, y);
+          downPending = false;
+        } else {
+          classifier.update(x, y);
+        }
+      } else if (!usesMultitouch && !hasTouchKey) {
+        touchEvent = {TouchEvent::Kind::Tap, x, y};
+        return true;
+      }
     }
   }
 }
@@ -144,6 +200,6 @@ bool TouchInput::waitForTap(TouchPoint& point) {
 
 TouchInput::~TouchInput() = default;
 bool TouchInput::openDevice() { return false; }
-bool TouchInput::waitForTap(TouchPoint&) { return false; }
+bool TouchInput::waitForEvent(TouchEvent&) { return false; }
 
 #endif

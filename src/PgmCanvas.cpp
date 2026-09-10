@@ -1,77 +1,95 @@
 #include "PgmCanvas.h"
 
-#include <algorithm>
-#include <cstdio>
-#include <cstring>
+#include "FontData.h"
+
+#include <stdio.h>
 
 namespace {
 
-struct Glyph {
-  uint8_t rows[7];
-};
-
-constexpr Glyph glyphFor(char ch) {
-  switch (ch) {
-    case 'A': return {{14, 17, 17, 31, 17, 17, 17}};
-    case 'B': return {{30, 17, 17, 30, 17, 17, 30}};
-    case 'C': return {{14, 17, 16, 16, 16, 17, 14}};
-    case 'D': return {{30, 17, 17, 17, 17, 17, 30}};
-    case 'E': return {{31, 16, 16, 30, 16, 16, 31}};
-    case 'F': return {{31, 16, 16, 30, 16, 16, 16}};
-    case 'G': return {{14, 17, 16, 23, 17, 17, 14}};
-    case 'H': return {{17, 17, 17, 31, 17, 17, 17}};
-    case 'I': return {{31, 4, 4, 4, 4, 4, 31}};
-    case 'J': return {{1, 1, 1, 1, 17, 17, 14}};
-    case 'K': return {{17, 18, 20, 24, 20, 18, 17}};
-    case 'L': return {{16, 16, 16, 16, 16, 16, 31}};
-    case 'M': return {{17, 27, 21, 21, 17, 17, 17}};
-    case 'N': return {{17, 25, 21, 19, 17, 17, 17}};
-    case 'O': return {{14, 17, 17, 17, 17, 17, 14}};
-    case 'P': return {{30, 17, 17, 30, 16, 16, 16}};
-    case 'Q': return {{14, 17, 17, 17, 21, 18, 13}};
-    case 'R': return {{30, 17, 17, 30, 20, 18, 17}};
-    case 'S': return {{15, 16, 16, 14, 1, 1, 30}};
-    case 'T': return {{31, 4, 4, 4, 4, 4, 4}};
-    case 'U': return {{17, 17, 17, 17, 17, 17, 14}};
-    case 'V': return {{17, 17, 17, 17, 17, 10, 4}};
-    case 'W': return {{17, 17, 17, 21, 21, 21, 10}};
-    case 'X': return {{17, 17, 10, 4, 10, 17, 17}};
-    case 'Y': return {{17, 17, 10, 4, 4, 4, 4}};
-    case 'Z': return {{31, 1, 2, 4, 8, 16, 31}};
-    case '0': return {{14, 17, 19, 21, 25, 17, 14}};
-    case '1': return {{4, 12, 4, 4, 4, 4, 14}};
-    case '2': return {{14, 17, 1, 2, 4, 8, 31}};
-    case '3': return {{30, 1, 1, 14, 1, 1, 30}};
-    case '4': return {{2, 6, 10, 18, 31, 2, 2}};
-    case '5': return {{31, 16, 16, 30, 1, 1, 30}};
-    case '6': return {{14, 16, 16, 30, 17, 17, 14}};
-    case '7': return {{31, 1, 2, 4, 8, 8, 8}};
-    case '8': return {{14, 17, 17, 14, 17, 17, 14}};
-    case '9': return {{14, 17, 17, 15, 1, 1, 14}};
-    case '+': return {{0, 4, 4, 31, 4, 4, 0}};
-    case '-': return {{0, 0, 0, 31, 0, 0, 0}};
-    case '/': return {{1, 1, 2, 4, 8, 16, 16}};
-    case ':': return {{0, 4, 4, 0, 4, 4, 0}};
-    case '.': return {{0, 0, 0, 0, 0, 12, 12}};
-    default: return {{0, 0, 0, 0, 0, 0, 0}};
+int capHeight(const TextSize size) {
+  switch (size) {
+    case TextSize::Small: return 22;
+    case TextSize::Body: return 32;
+    case TextSize::Display: return 62;
   }
+  return 32;
+}
+
+int scaledEdge(const int sourcePixel, const TextSize size) {
+  return (sourcePixel * capHeight(size) + 3) / 7;
+}
+
+const uint8_t* glyphFor(const uint32_t codepoint) {
+  if (codepoint < 128) return font_data::BASIC[codepoint];
+  if (codepoint >= 0xA0 && codepoint <= 0xFF) return font_data::LATIN1[codepoint - 0xA0];
+  return font_data::BASIC[static_cast<unsigned int>('?')];
+}
+
+uint32_t nextCodepoint(const char*& cursor) {
+  const auto first = static_cast<uint8_t>(*cursor++);
+  if (first < 0x80) return first;
+  int continuationCount = 0;
+  uint32_t codepoint = 0;
+  if (first >= 0xC2 && first <= 0xDF) {
+    continuationCount = 1;
+    codepoint = first & 0x1F;
+  } else if (first >= 0xE0 && first <= 0xEF) {
+    continuationCount = 2;
+    codepoint = first & 0x0F;
+  } else if (first >= 0xF0 && first <= 0xF4) {
+    continuationCount = 3;
+    codepoint = first & 0x07;
+  }
+  if (continuationCount == 0) return '?';
+  for (int index = 0; index < continuationCount; ++index) {
+    const auto next = static_cast<uint8_t>(cursor[index]);
+    if ((next & 0xC0) != 0x80) return '?';
+    codepoint = (codepoint << 6) | (next & 0x3F);
+  }
+  cursor += continuationCount;
+  if (codepoint == 0x2013 || codepoint == 0x2014) return '-';
+  if (codepoint == 0x2018 || codepoint == 0x2019) return '\'';
+  if (codepoint == 0x201C || codepoint == 0x201D) return '"';
+  return codepoint;
+}
+
+void horizontalBounds(const uint8_t* glyph, int& left, int& right) {
+  left = 8;
+  right = -1;
+  for (int row = 0; row < 8; ++row) {
+    for (int column = 0; column < 8; ++column) {
+      if ((glyph[row] & (1U << column)) == 0) continue;
+      if (column < left) left = column;
+      if (column > right) right = column;
+    }
+  }
+}
+
+int glyphAdvance(const uint32_t codepoint, const TextSize size) {
+  if (codepoint == ' ' || codepoint == 0xA0) return scaledEdge(4, size);
+  int left;
+  int right;
+  horizontalBounds(glyphFor(codepoint), left, right);
+  if (right < left) return scaledEdge(4, size);
+  return scaledEdge(right - left + 1, size) + scaledEdge(1, size);
 }
 
 }  // namespace
 
-void PgmCanvas::clear(const bool black) { pixels.fill(black ? 0x00 : 0xFF); }
+void PgmCanvas::clear(const bool black) {
+  for (size_t index = 0; index < sizeof(pixels); ++index) pixels[index] = black ? 0x00 : 0xFF;
+}
 
 void PgmCanvas::setPixel(const int x, const int y, const bool black) {
   if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
-  const std::size_t index = static_cast<std::size_t>(y * WIDTH + x);
-  pixels[index] = black ? 0x00 : 0xFF;
+  pixels[static_cast<size_t>(y * WIDTH + x)] = black ? 0x00 : 0xFF;
 }
 
-void PgmCanvas::fillRect(int x, int y, int width, int height, const bool black) {
-  const int left = std::max(0, x);
-  const int top = std::max(0, y);
-  const int right = std::min(WIDTH, x + width);
-  const int bottom = std::min(HEIGHT, y + height);
+void PgmCanvas::fillRect(const int x, const int y, const int width, const int height, const bool black) {
+  const int left = x > 0 ? x : 0;
+  const int top = y > 0 ? y : 0;
+  const int right = x + width < WIDTH ? x + width : WIDTH;
+  const int bottom = y + height < HEIGHT ? y + height : HEIGHT;
   for (int py = top; py < bottom; ++py) {
     for (int px = left; px < right; ++px) setPixel(px, py, black);
   }
@@ -84,36 +102,54 @@ void PgmCanvas::drawRect(const int x, const int y, const int width, const int he
   fillRect(x + width - thickness, y, thickness, height);
 }
 
-void PgmCanvas::drawChar(const int x, const int y, const char ch, const int scale, const bool black) {
-  const Glyph glyph = glyphFor(ch);
-  for (int row = 0; row < 7; ++row) {
-    for (int col = 0; col < 5; ++col) {
-      if ((glyph.rows[row] & (1U << (4 - col))) != 0) {
-        fillRect(x + col * scale, y + row * scale, scale, scale, black);
-      }
+void PgmCanvas::drawGlyph(const int x, const int y, const uint32_t codepoint, const TextSize size,
+                          const bool black) {
+  const uint8_t* glyph = glyphFor(codepoint);
+  int left;
+  int right;
+  horizontalBounds(glyph, left, right);
+  if (right < left) return;
+
+  for (int row = 0; row < 8; ++row) {
+    for (int column = left; column <= right; ++column) {
+      if ((glyph[row] & (1U << column)) == 0) continue;
+      const int pixelLeft = scaledEdge(column - left, size);
+      const int pixelRight = scaledEdge(column - left + 1, size);
+      const int pixelTop = scaledEdge(row, size);
+      const int pixelBottom = scaledEdge(row + 1, size);
+      fillRect(x + pixelLeft, y + pixelTop, pixelRight - pixelLeft, pixelBottom - pixelTop, black);
     }
   }
 }
 
-void PgmCanvas::drawText(int x, const int y, const char* text, const int scale, const bool black) {
-  if (text == nullptr) return;
-  for (const char* cursor = text; *cursor != '\0'; ++cursor) {
-    drawChar(x, y, *cursor, scale, black);
-    x += 6 * scale;
+int PgmCanvas::measureText(const char* utf8, const TextSize size) const {
+  if (utf8 == nullptr) return 0;
+  int width = 0;
+  for (const char* cursor = utf8; *cursor != '\0';) width += glyphAdvance(nextCodepoint(cursor), size);
+  return width == 0 ? 0 : width - scaledEdge(1, size);
+}
+
+int PgmCanvas::lineHeight(const TextSize size) const { return scaledEdge(9, size); }
+
+void PgmCanvas::drawText(int x, const int y, const char* utf8, const TextSize size, const TextAlign align,
+                         const bool inverted) {
+  if (utf8 == nullptr) return;
+  const int width = measureText(utf8, size);
+  if (align == TextAlign::Center) x -= width / 2;
+  if (align == TextAlign::Right) x -= width;
+
+  for (const char* cursor = utf8; *cursor != '\0';) {
+    const uint32_t codepoint = nextCodepoint(cursor);
+    drawGlyph(x, y, codepoint, size, !inverted);
+    x += glyphAdvance(codepoint, size);
   }
 }
 
-void PgmCanvas::drawTextCentered(const int centerX, const int y, const char* text, const int scale,
-                                 const bool black) {
-  const int width = static_cast<int>(std::strlen(text)) * 6 * scale - scale;
-  drawText(centerX - width / 2, y, text, scale, black);
-}
-
 bool PgmCanvas::write(const char* path) const {
-  FILE* file = std::fopen(path, "wb");
+  FILE* file = fopen(path, "wb");
   if (file == nullptr) return false;
-  const int headerResult = std::fprintf(file, "P5\n%d %d\n255\n", WIDTH, HEIGHT);
-  const std::size_t written = std::fwrite(pixels.data(), 1, pixels.size(), file);
-  const int closeResult = std::fclose(file);
-  return headerResult > 0 && written == pixels.size() && closeResult == 0;
+  const int headerResult = fprintf(file, "P5\n%d %d\n255\n", WIDTH, HEIGHT);
+  const size_t written = fwrite(pixels, 1, sizeof(pixels), file);
+  const int closeResult = fclose(file);
+  return headerResult > 0 && written == sizeof(pixels) && closeResult == 0;
 }

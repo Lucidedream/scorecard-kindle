@@ -1,8 +1,30 @@
 #pragma once
 
-struct TouchPoint {
+#include <stdint.h>
+
+struct TouchEvent {
+  enum class Kind { Tap, SwipeLeft, SwipeRight, LongPress };
+
+  Kind kind;
   int x;
   int y;
+};
+
+class GestureClassifier {
+ public:
+  static constexpr int SWIPE_DISTANCE = 140;
+  static constexpr int LONG_PRESS_MS = 450;
+  static constexpr int LONG_PRESS_TRAVEL = 40;
+
+  void begin(uint64_t timeMs, int x, int y);
+  void update(int x, int y);
+  TouchEvent finish(uint64_t timeMs, int x, int y);
+
+ private:
+  uint64_t downTimeMs = 0;
+  int downX = 0;
+  int downY = 0;
+  int maximumTravelSquared = 0;
 };
 
 class TouchInput {
@@ -14,8 +36,8 @@ class TouchInput {
   TouchInput& operator=(const TouchInput&) = delete;
 
   bool openDevice();
-  bool waitForTap(TouchPoint& point);
- const char* deviceName() const { return name; }
+  bool waitForEvent(TouchEvent& touchEvent);
+  const char* deviceName() const { return name; }
 
  private:
 #if defined(__linux__)

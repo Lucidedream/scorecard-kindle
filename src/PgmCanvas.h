@@ -1,8 +1,10 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
+
+enum class TextSize { Small, Body, Display };
+enum class TextAlign { Left, Center, Right };
 
 class PgmCanvas {
  public:
@@ -12,13 +14,15 @@ class PgmCanvas {
   void clear(bool black = false);
   void fillRect(int x, int y, int width, int height, bool black = true);
   void drawRect(int x, int y, int width, int height, int thickness = 4);
-  void drawText(int x, int y, const char* text, int scale = 6, bool black = true);
-  void drawTextCentered(int centerX, int y, const char* text, int scale = 6, bool black = true);
+  void drawText(int x, int y, const char* utf8, TextSize size, TextAlign align = TextAlign::Left,
+                bool inverted = false);
+  int measureText(const char* utf8, TextSize size) const;
+  int lineHeight(TextSize size) const;
   bool write(const char* path) const;
 
  private:
   void setPixel(int x, int y, bool black);
-  void drawChar(int x, int y, char ch, int scale, bool black);
+  void drawGlyph(int x, int y, uint32_t codepoint, TextSize size, bool black);
 
-  std::array<uint8_t, static_cast<std::size_t>(WIDTH * HEIGHT)> pixels{};
+  uint8_t pixels[static_cast<size_t>(WIDTH * HEIGHT)]{};
 };
