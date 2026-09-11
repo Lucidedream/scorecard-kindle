@@ -65,13 +65,21 @@ int csvFields(char* line, char* fields[], const int capacity) {
 }
 
 void drawHome(PgmCanvas& canvas, HitTester& hits, const HomeSummary& summary) {
-  const Rect top{0, 0, PgmCanvas::WIDTH, PgmCanvas::HEIGHT / 2};
-  const Rect bottom{0, top.height, PgmCanvas::WIDTH, PgmCanvas::HEIGHT - top.height};
+  constexpr int EXIT_BAR_HEIGHT = 90;
+  const Rect exitBar{0, 0, PgmCanvas::WIDTH, EXIT_BAR_HEIGHT};
+  const int tilesTop = EXIT_BAR_HEIGHT;
+  const int tilesHeight = PgmCanvas::HEIGHT - tilesTop;
+  const Rect top{0, tilesTop, PgmCanvas::WIDTH, tilesHeight / 2};
+  const Rect bottom{0, top.y + top.height, PgmCanvas::WIDTH, PgmCanvas::HEIGHT - top.y - top.height};
+  canvas.fillRect(0, EXIT_BAR_HEIGHT - 2, PgmCanvas::WIDTH, 2);
+  canvas.drawText(PgmCanvas::WIDTH - 40, (EXIT_BAR_HEIGHT - canvas.lineHeight(TextSize::Body)) / 2, "EXIT",
+                  TextSize::Body, TextAlign::Right);
+  hits.add(exitBar, SetupExit);
   canvas.fillRect(top.x, top.y, top.width, top.height);
-  canvas.fillRect(0, top.height, PgmCanvas::WIDTH, 3);
+  canvas.fillRect(0, top.y + top.height, PgmCanvas::WIDTH, 3);
   constexpr int LABEL_Y = 274;
   constexpr int DETAIL_Y = 396;
-  canvas.drawText(54, LABEL_Y, "NEW ROUND", TextSize::Display, TextAlign::Left, true);
+  canvas.drawText(54, top.y + LABEL_Y, "NEW ROUND", TextSize::Display, TextAlign::Left, true);
   char detail[112];
   if (summary.hasLast) {
     char relative[16];
@@ -79,7 +87,7 @@ void drawHome(PgmCanvas& canvas, HitTester& hits, const HomeSummary& summary) {
     else snprintf(relative, sizeof(relative), "%+d", summary.lastToPar);
     snprintf(detail, sizeof(detail), "Last · %s · %u (%s)", summary.lastCourse, summary.lastScore, relative);
   } else copyText(detail, sizeof(detail), "No rounds yet");
-  canvas.drawText(56, DETAIL_Y, detail, TextSize::Small, TextAlign::Left, false, INK_GHOST);
+  canvas.drawText(56, top.y + DETAIL_Y, detail, TextSize::Small, TextAlign::Left, false, INK_GHOST);
   canvas.drawText(54, bottom.y + LABEL_Y, "HISTORY", TextSize::Display);
   if (summary.rounds == 0) copyText(detail, sizeof(detail), "No rounds yet");
   else snprintf(detail, sizeof(detail), "%u rounds recorded", summary.rounds);

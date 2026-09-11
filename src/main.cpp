@@ -918,6 +918,9 @@ int main(const int argc, char** argv) {
         screen = Screen::HistoryPlayers;
         repaint = true;
         forceGc = true;
+      } else if (action == SetupExit) {
+        unlink(SCREEN_PATH);
+        return 0;
       }
     } else if (screen == Screen::HistoryPlayers && event.kind == TouchEvent::Kind::Tap) {
       if (action == Action::ViewBack) screen = Screen::Home;

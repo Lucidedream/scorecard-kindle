@@ -21,6 +21,7 @@ enum SetupAction {
   SetupEditName = SetupPlayerFirst + GOLF_MAX_PLAYERS,
   SetupEditTee,
   SetupTeeFirst,
+  SetupExit = SetupTeeFirst + 100,
 };
 
 struct HomeSummary {
