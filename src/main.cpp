@@ -1,3 +1,4 @@
+#include "Battery.h"
 #include "HitTester.h"
 #include "History.h"
 #include "HoleReviewScreen.h"
@@ -112,6 +113,24 @@ uint64_t nowMs() {
   return static_cast<uint64_t>(now.tv_sec) * 1000U + static_cast<uint64_t>(now.tv_nsec) / 1000000U;
 }
 
+constexpr uint64_t BATTERY_REFRESH_MS = 30000;
+
+// Rate-limited: a fresh read touches a few sysfs files, cheap on its own but
+// not worth repeating on every repaint. Cached value survives an unreadable
+// node (a stale reading beats a flickering one); -2 means never read yet.
+int cachedBatteryPercent() {
+  static int cached = -2;
+  static uint64_t lastReadAt = 0;
+  const uint64_t now = nowMs();
+  if (cached == -2 || now - lastReadAt >= BATTERY_REFRESH_MS) {
+    const int fresh = readBatteryPercent();
+    if (fresh >= 0) cached = fresh;
+    else if (cached == -2) cached = -1;
+    lastReadAt = now;
+  }
+  return cached;
+}
+
 void makeDefaultRound(GolfRound& round) {
   round = {};
   applyCourse(round, GOLF_BUILT_IN_COURSES[0], GOLF_BUILT_IN_COURSES[0].tees[0].name);
@@ -181,9 +200,13 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
 
   canvas.drawText(38, layout.header.y + (layout.header.height - canvas.lineHeight(TextSize::Body)) / 2,
                   view.header, TextSize::Body);
+  const int battery = cachedBatteryPercent();
+  char batteryLabel[6];
+  if (battery >= 0) snprintf(batteryLabel, sizeof(batteryLabel), "%d%%", battery);
+  else snprintf(batteryLabel, sizeof(batteryLabel), "-%%");
   canvas.drawText(PgmCanvas::WIDTH - 38,
                   layout.header.y + (layout.header.height - canvas.lineHeight(TextSize::Small)) / 2,
-                  "62%", TextSize::Small, TextAlign::Right);
+                  batteryLabel, TextSize::Small, TextAlign::Right);
 
   canvas.fillRect(0, layout.holeStrip.y, PgmCanvas::WIDTH, 2);
   drawCentered(layout.holeStrip, view.hole, TextSize::Display, false, 0, 19);

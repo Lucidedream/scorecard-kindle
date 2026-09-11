@@ -9,7 +9,8 @@ mkdir -p "$OUTPUT_DIR"
 
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
-  "$SCRIPT_DIR/src/main.cpp" "$SCRIPT_DIR/src/PgmCanvas.cpp" "$SCRIPT_DIR/src/ScoringScreen.cpp" \
+  "$SCRIPT_DIR/src/main.cpp" "$SCRIPT_DIR/src/Battery.cpp" "$SCRIPT_DIR/src/PgmCanvas.cpp" \
+  "$SCRIPT_DIR/src/ScoringScreen.cpp" \
   "$SCRIPT_DIR/src/History.cpp" \
   "$SCRIPT_DIR/src/MarkSheet.cpp" "$SCRIPT_DIR/src/ScorecardScreen.cpp" \
   "$SCRIPT_DIR/src/HoleReviewScreen.cpp" "$SCRIPT_DIR/src/SummaryScreen.cpp" \
@@ -26,6 +27,11 @@ mkdir -p "$OUTPUT_DIR"
   -I"$SCRIPT_DIR/src" \
   "$SCRIPT_DIR/tests/m0_tests.cpp" "$SCRIPT_DIR/src/PgmCanvas.cpp" "$SCRIPT_DIR/src/TouchInput.cpp" \
   -o "$OUTPUT_DIR/m0_tests"
+
+"$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
+  -I"$SCRIPT_DIR/src" \
+  "$SCRIPT_DIR/tests/battery_tests.cpp" "$SCRIPT_DIR/src/Battery.cpp" \
+  -o "$OUTPUT_DIR/battery_tests"
 
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
@@ -77,6 +83,7 @@ mkdir -p "$OUTPUT_DIR"
   -o "$OUTPUT_DIR/m6_tests"
 
 "$OUTPUT_DIR/m0_tests"
+"$OUTPUT_DIR/battery_tests"
 GOLF_TEST_DIR=$(mktemp -d /tmp/scorecard-golf-tests.XXXXXX)
 SCORECARD_DIR="$GOLF_TEST_DIR" "$OUTPUT_DIR/golf_tests"
 rm -r "$GOLF_TEST_DIR"
