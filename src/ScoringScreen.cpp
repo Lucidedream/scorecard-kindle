@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr int HEADER_HEIGHT = 108;
+constexpr int HEADER_HEIGHT = 76;
 constexpr int HOLE_STRIP_HEIGHT = 132;
 constexpr int CONTEXT_HEIGHT = 56;
 constexpr int TOTALS_HEIGHT = 150;
@@ -64,8 +64,19 @@ ScoringLayout scoringLayout(const GolfField focused) {
   const int focusedHeight = metricHeight - 2 * NORMAL_HEIGHT;
   int y = metricTop;
   for (uint8_t index = 0; index < 3; ++index) {
-    const int height = index == fieldIndex(focused) ? focusedHeight : NORMAL_HEIGHT;
+    const bool isFocused = index == fieldIndex(focused);
+    const int height = isFocused ? focusedHeight : NORMAL_HEIGHT;
     layout.metrics[index] = {0, y, PgmCanvas::WIDTH, height};
+    const int buttonWidth = isFocused ? 136 : 100;
+    const int buttonHeight = isFocused ? 140 : 100;
+    const int buttonY = y + (height - buttonHeight) / 2;
+    const int plusX = PgmCanvas::WIDTH - 38 - buttonWidth;
+    constexpr int BUTTON_GAP = 44;
+    constexpr int VALUE_WIDTH = 120;
+    const int valueRight = plusX - BUTTON_GAP;
+    layout.plus[index] = {plusX, buttonY, buttonWidth, buttonHeight};
+    layout.minus[index] = {valueRight - VALUE_WIDTH - BUTTON_GAP - buttonWidth, buttonY,
+                           buttonWidth, buttonHeight};
     y += height;
   }
 

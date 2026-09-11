@@ -13,6 +13,8 @@ struct ScoringLayout {
   Rect context;
   Rect fairway;
   Rect metrics[3];
+  Rect minus[3];
+  Rect plus[3];
   Rect totals;
   Rect thisHole;
   Rect round;

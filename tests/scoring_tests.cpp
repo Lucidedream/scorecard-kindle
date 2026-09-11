@@ -19,7 +19,7 @@ void resetRound() {
 
 void testLayout() {
   const ScoringLayout putts = scoringLayout(GolfField::Putts);
-  assert(putts.header.height == 108);
+  assert(putts.header.height == 76);
   assert(putts.holeStrip.height >= 90 && putts.previous.width >= 132 && putts.previous.height >= 132);
   assert(putts.metrics[0].height > putts.metrics[1].height);
   assert(putts.metrics[0].height * 10 >= putts.metrics[1].height * 16);
@@ -29,6 +29,22 @@ void testLayout() {
   assert(!putts.menu.contains(putts.mark.x, putts.mark.y));
   const ScoringLayout inside = scoringLayout(GolfField::In100);
   assert(inside.metrics[1].height > inside.metrics[0].height);
+  const ScoringLayout out = scoringLayout(GolfField::Out100);
+  assert(putts.totals.y == inside.totals.y && inside.totals.y == out.totals.y);
+  assert(putts.footer.y == inside.footer.y && inside.footer.y == out.footer.y);
+  for (uint8_t index = 0; index < 3; ++index) {
+    assert(putts.minus[index].width >= 100 && putts.minus[index].height >= 100);
+    assert(putts.plus[index].width >= 100 && putts.plus[index].height >= 100);
+    assert(putts.minus[index].x + putts.minus[index].width < putts.plus[index].x);
+    assert(putts.metrics[index].contains(putts.minus[index].x, putts.minus[index].y));
+    assert(putts.metrics[index].contains(putts.plus[index].x, putts.plus[index].y));
+    if (index != 0) {
+      assert(putts.minus[index - 1].y + putts.minus[index - 1].height < putts.minus[index].y);
+      assert(putts.plus[index - 1].y + putts.plus[index - 1].height < putts.plus[index].y);
+    }
+  }
+  assert(putts.minus[0].width > putts.minus[1].width);
+  assert(inside.plus[1].height > inside.plus[0].height);
   assert(putts.fairway.width > 0 && putts.context.contains(putts.fairway.x, putts.fairway.y));
   const MarkSheetLayout mark = markSheetLayout();
   assert(mark.scrim.y == 0 && mark.sheet.y == mark.scrim.height);

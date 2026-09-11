@@ -32,9 +32,12 @@ constexpr uint64_t IDLE_WRITE_MS = 5000;
 enum Action {
   Previous = 1,
   Next,
-  Putts,
-  In100,
-  Out100,
+  PuttsMinus,
+  PuttsPlus,
+  In100Minus,
+  In100Plus,
+  Out100Minus,
+  Out100Plus,
   Menu,
   Mark,
   MenuScorecard,
@@ -180,9 +183,6 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
                   "62%", TextSize::Small, TextAlign::Right);
 
   canvas.fillRect(0, layout.holeStrip.y, PgmCanvas::WIDTH, 2);
-  canvas.fillRect(0, layout.holeStrip.y + layout.holeStrip.height - 2, PgmCanvas::WIDTH, 2);
-  drawCentered(layout.previous, "<", TextSize::Display);
-  drawCentered(layout.next, ">", TextSize::Display);
   drawCentered(layout.holeStrip, view.hole, TextSize::Display);
   hitTester.add(layout.previous, Action::Previous);
   hitTester.add(layout.next, Action::Next);
@@ -203,9 +203,13 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
     hitTester.add(layout.fairway, Action::Fairway);
   }
   static constexpr char LABELS[3][16] = {"PUTTS", "INSIDE 100", "SCORE ZONE"};
+  static constexpr Action MINUS_ACTIONS[3] = {Action::PuttsMinus, Action::In100Minus,
+                                               Action::Out100Minus};
+  static constexpr Action PLUS_ACTIONS[3] = {Action::PuttsPlus, Action::In100Plus,
+                                              Action::Out100Plus};
   for (uint8_t index = 0; index < 3; ++index) {
     const Rect rect = layout.metrics[index];
-    canvas.fillRect(38, rect.y, PgmCanvas::WIDTH - 76, 2);
+    if (index != 0) canvas.fillRect(38, rect.y, PgmCanvas::WIDTH - 76, 2);
     const bool isFocused = index == static_cast<uint8_t>(focused);
     const int labelY = rect.y + (rect.height - canvas.lineHeight(TextSize::Small)) / 2;
     canvas.drawText(56, labelY, LABELS[index], TextSize::Small, TextAlign::Left, false,
@@ -219,9 +223,17 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
     snprintf(value, sizeof(value), "%u", view.values[index]);
     const TextSize size = isFocused ? TextSize::Display : TextSize::Body;
     const uint8_t shade = view.seeded ? INK_GHOST : 0;
-    canvas.drawText(PgmCanvas::WIDTH - 54, rect.y + (rect.height - canvas.lineHeight(size)) / 2,
+    canvas.drawRect(layout.minus[index].x, layout.minus[index].y, layout.minus[index].width,
+                    layout.minus[index].height, isFocused ? 5 : 3);
+    canvas.drawRect(layout.plus[index].x, layout.plus[index].y, layout.plus[index].width,
+                    layout.plus[index].height, isFocused ? 5 : 3);
+    drawCentered(layout.minus[index], "-", TextSize::Body);
+    drawCentered(layout.plus[index], "+", TextSize::Body);
+    canvas.drawText(layout.plus[index].x - 44,
+                    rect.y + (rect.height - canvas.lineHeight(size)) / 2,
                     value, size, TextAlign::Right, false, shade);
-    hitTester.add(rect, Action::Putts + index);
+    hitTester.add(layout.minus[index], MINUS_ACTIONS[index]);
+    hitTester.add(layout.plus[index], PLUS_ACTIONS[index]);
   }
 
   canvas.fillRect(0, layout.totals.y, PgmCanvas::WIDTH, 2);
@@ -1064,15 +1076,22 @@ int main(const int argc, char** argv) {
         repaint = true;
         forceGc = true;
       } else if ((event.kind == TouchEvent::Kind::Tap || event.kind == TouchEvent::Kind::LongPress) &&
-                 action >= Action::Putts && action <= Action::Out100) {
-        focused = static_cast<GolfField>(action - Action::Putts);
+                 action >= Action::PuttsMinus && action <= Action::Out100Plus) {
+        const GolfField field = static_cast<GolfField>((action - Action::PuttsMinus) / 2);
+        const bool decrement = (action - Action::PuttsMinus) % 2 == 0;
+        const bool focusChanged = focused != field;
+        focused = field;
         const uint16_t repeats = event.kind == TouchEvent::Kind::LongPress
                                      ? static_cast<uint16_t>(1 + (event.durationMs - GestureClassifier::LONG_PRESS_MS) / 200)
                                      : 1;
-        if (changeGolfField(round, focused, event.kind == TouchEvent::Kind::LongPress, repeats)) {
+        if (changeGolfField(round, focused, decrement, repeats)) {
           counterDirty = true;
           counterChangedAt = nowMs();
           repaint = true;
+        }
+        if (focusChanged) {
+          repaint = true;
+          forceGc = true;
         }
       } else if ((event.kind == TouchEvent::Kind::Tap || event.kind == TouchEvent::Kind::LongPress) &&
                  action == Action::Menu) {
