@@ -157,8 +157,8 @@ void logEvent(const TouchEvent& event, const int action) {
 }
 
 void drawCentered(const Rect rect, const char* label, const TextSize size, const bool inverted = false,
-                  const uint8_t shade = 0) {
-  const int y = rect.y + (rect.height - canvas.lineHeight(size)) / 2;
+                  const uint8_t shade = 0, const int yNudge = 0) {
+  const int y = rect.y + (rect.height - canvas.lineHeight(size)) / 2 + yNudge;
   canvas.drawText(rect.x + rect.width / 2, y, label, size, TextAlign::Center, inverted, shade);
 }
 
@@ -183,7 +183,7 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
                   "62%", TextSize::Small, TextAlign::Right);
 
   canvas.fillRect(0, layout.holeStrip.y, PgmCanvas::WIDTH, 2);
-  drawCentered(layout.holeStrip, view.hole, TextSize::Display);
+  drawCentered(layout.holeStrip, view.hole, TextSize::Display, false, 0, 19);
   hitTester.add(layout.previous, Action::Previous);
   hitTester.add(layout.next, Action::Next);
   hitTester.add({layout.previous.x + layout.previous.width, layout.holeStrip.y,
@@ -199,7 +199,7 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
                                          layout.fairway.height);
     else canvas.drawRect(layout.fairway.x, layout.fairway.y, layout.fairway.width,
                          layout.fairway.height, 2);
-    drawCentered(layout.fairway, "FAIRWAY", TextSize::Small, view.fairwayHit);
+    drawCentered(layout.fairway, "FAIRWAY", TextSize::Small, view.fairwayHit, 0, 7);
     hitTester.add(layout.fairway, Action::Fairway);
   }
   static constexpr char LABELS[3][16] = {"PUTTS", "INSIDE 100", "SCORE ZONE"};
@@ -223,16 +223,13 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
     snprintf(value, sizeof(value), "%u", view.values[index]);
     const TextSize size = isFocused ? TextSize::Display : TextSize::Body;
     const uint8_t shade = view.seeded ? INK_GHOST : 0;
-    canvas.drawRect(layout.minus[index].x, layout.minus[index].y, layout.minus[index].width,
-                    layout.minus[index].height, isFocused ? 5 : 3);
-    canvas.drawRect(layout.plus[index].x, layout.plus[index].y, layout.plus[index].width,
-                    layout.plus[index].height, isFocused ? 5 : 3);
-    drawCentered(layout.minus[index], "-", TextSize::Body);
+    const Rect minus = scoringMinusRect(layout, index, canvas.measureText(value, size));
+    drawCentered(minus, "-", TextSize::Body);
     drawCentered(layout.plus[index], "+", TextSize::Body);
     canvas.drawText(layout.plus[index].x - 44,
                     rect.y + (rect.height - canvas.lineHeight(size)) / 2,
                     value, size, TextAlign::Right, false, shade);
-    hitTester.add(layout.minus[index], MINUS_ACTIONS[index]);
+    hitTester.add(minus, MINUS_ACTIONS[index]);
     hitTester.add(layout.plus[index], PLUS_ACTIONS[index]);
   }
 

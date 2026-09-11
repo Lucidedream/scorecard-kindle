@@ -53,6 +53,24 @@ void testLayout() {
   assert(INK_DIM % 17 == 0 && INK_GHOST % 17 == 0 && INK_HAIRLINE % 17 == 0);
 }
 
+void testValueButtonSpacing() {
+  const ScoringLayout layout = scoringLayout(GolfField::Putts);
+  constexpr int VALUE_2_WIDTH = 52;
+  constexpr int VALUE_12_WIDTH = 87;
+  const Rect single = scoringMinusRect(layout, 0, VALUE_2_WIDTH);
+  const Rect wide = scoringMinusRect(layout, 0, VALUE_12_WIDTH);
+  const int valueRight = layout.plus[0].x - 44;
+  const int singleLeft = valueRight - VALUE_2_WIDTH;
+  const int wideLeft = valueRight - VALUE_12_WIDTH;
+  assert(single.x + single.width + 44 == singleLeft);
+  assert(wide.x + wide.width + 44 == wideLeft);
+  assert(valueRight + 44 == layout.plus[0].x);
+  assert(single.x + single.width < singleLeft && wide.x + wide.width < wideLeft);
+  assert(single.width >= 100 && single.height >= 100);
+  assert(wide.width >= 100 && wide.height >= 100);
+  assert(wide.x == single.x - (VALUE_12_WIDTH - VALUE_2_WIDTH));
+}
+
 void testSeededAndLoggedView() {
   resetRound();
   round.currentHole = 6;
@@ -256,6 +274,7 @@ void testMarkEventWalkPersists() {
 
 int main() {
   testLayout();
+  testValueButtonSpacing();
   testSeededAndLoggedView();
   testParFreeTotals();
   testForwardCommitRules();

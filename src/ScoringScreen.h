@@ -50,6 +50,7 @@ struct GolfAdvanceResult {
 };
 
 ScoringLayout scoringLayout(GolfField focused);
+Rect scoringMinusRect(const ScoringLayout& layout, uint8_t index, int valueWidth);
 ScoringView scoringView(const GolfRound& round, GolfField focused);
 bool golfHoleIsLogged(const GolfPlayerScore& score, uint8_t hole);
 bool commitGolfPreview(GolfRound& round);

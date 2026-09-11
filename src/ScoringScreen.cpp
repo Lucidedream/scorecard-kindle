@@ -89,6 +89,14 @@ ScoringLayout scoringLayout(const GolfField focused) {
   return layout;
 }
 
+Rect scoringMinusRect(const ScoringLayout& layout, const uint8_t index, const int valueWidth) {
+  if (index >= 3) return {};
+  constexpr int BUTTON_GAP = 44;
+  Rect minus = layout.minus[index];
+  minus.x = layout.plus[index].x - BUTTON_GAP - valueWidth - BUTTON_GAP - minus.width;
+  return minus;
+}
+
 ScoringView scoringView(const GolfRound& round, const GolfField focused) {
   ScoringView view{};
   view.layout = scoringLayout(focused);
