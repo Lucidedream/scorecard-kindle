@@ -285,10 +285,6 @@ void drawSetupScreen(PgmCanvas& canvas, HitTester& hits, const SetupScreen scree
   hits.clear();
   switch (screen) {
     case SetupScreen::Home: drawHome(canvas, hits, summary); break;
-    case SetupScreen::History:
-      header(canvas, hits, "HISTORY");
-      canvas.drawText(PgmCanvas::WIDTH / 2, 590, "History — coming soon", TextSize::Body, TextAlign::Center);
-      break;
     case SetupScreen::Courses: drawCourses(canvas, hits); break;
     case SetupScreen::PlayerCount: drawCount(canvas, hits, setup); break;
     case SetupScreen::Roster: drawRoster(canvas, hits, setup); break;

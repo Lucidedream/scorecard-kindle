@@ -54,6 +54,41 @@ bool copy(FILE* input, FILE* output) {
   return !ferror(input);
 }
 
+bool validArchiveName(const char* file) {
+  return file != nullptr && file[0] != '\0' && strchr(file, '/') == nullptr && strstr(file, "..") == nullptr;
+}
+
+bool lineMatchesFile(const char* line, const char* filename, int* slot = nullptr) {
+  // The archive filename is generated and therefore never quoted. It is the final field.
+  const char* end = line + strlen(line);
+  while (end > line && (end[-1] == '\n' || end[-1] == '\r')) --end;
+  const char* comma = end;
+  while (comma > line && comma[-1] != ',') --comma;
+  if (static_cast<size_t>(end - comma) != strlen(filename) || strncmp(comma, filename, end - comma) != 0) return false;
+  if (slot != nullptr) {
+    // Find playerSlot (field 3), respecting the only potentially quoted preceding field: course.
+    unsigned field = 0;
+    bool quoted = false;
+    const char* start = line;
+    for (const char* p = line; p < comma; ++p) {
+      if (*p == '"') {
+        if (quoted && p + 1 < comma && p[1] == '"') ++p;
+        else quoted = !quoted;
+      } else if (*p == ',' && !quoted) {
+        if (field == 3) break;
+        ++field;
+        start = p + 1;
+      }
+    }
+    if (field != 3) return false;
+    char* parsedEnd = nullptr;
+    const long parsed = strtol(start, &parsedEnd, 10);
+    if (parsedEnd == start || *parsedEnd != ',') return false;
+    *slot = static_cast<int>(parsed);
+  }
+  return true;
+}
+
 unsigned nextSequence(const char* roundsPath) {
   unsigned maximum = 0;
   DIR* directory = opendir(roundsPath);
@@ -80,6 +115,22 @@ bool writeArchiveFile(const char* path, const GolfRound& round) {
   return true;
 }
 
+bool writeIndexRow(FILE* output, const char* filename, const GolfRound& round, const uint8_t slot) {
+  const GolfPlayer& player = round.players[slot];
+  char date[11] = "";
+  golfFormatDate(round.dateYmd, date, sizeof(date));
+  return csv(output, date) && fputc(',', output) != EOF && csv(output, round.courseName) &&
+         fprintf(output, ",%u,%u,", round.holeCount, slot) >= 0 && csv(output, player.name) &&
+         fprintf(output, ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,",
+                 golfScore(round, player.score), golfParTotal(round, player.score),
+                 golfPuttsTotal(round, player.score), golfIn100Total(round, player.score),
+                 golfLongTotal(round, player.score), golfHazardsForRound(player.score, round.holeCount),
+                 golfObsForRound(player.score, round.holeCount), golfFairwaysHit(round, player.score),
+                 golfFairwaysEligible(round, player.score), golfGreensInRegulation(round, player.score),
+                 golfGreensEligible(round, player.score)) >= 0 &&
+         csv(output, filename) && fputc('\n', output) != EOF;
+}
+
 bool appendIndex(const char* roundsPath, const char* filename, const GolfRound& round) {
   char live[GOLF_PATH_CAPACITY];
   char staged[GOLF_PATH_CAPACITY];
@@ -99,21 +150,10 @@ bool appendIndex(const char* roundsPath, const char* filename, const GolfRound& 
     ok = fputs(INDEX_HEADER, output) != EOF;
   }
 
-  char date[11] = "";
-  golfFormatDate(round.dateYmd, date, sizeof(date));
   for (uint8_t slot = 0; ok && slot < GolfRound::MAX_PLAYERS; ++slot) {
     const GolfPlayer& player = round.players[slot];
     if (!golfPlayerIsEnabled(player)) continue;
-    ok = csv(output, date) && fputc(',', output) != EOF && csv(output, round.courseName) &&
-         fprintf(output, ",%u,%u,", round.holeCount, slot) >= 0 && csv(output, player.name) &&
-         fprintf(output, ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,",
-                 golfScore(round, player.score), golfParTotal(round, player.score),
-                 golfPuttsTotal(round, player.score), golfIn100Total(round, player.score),
-                 golfLongTotal(round, player.score), golfHazardsForRound(player.score, round.holeCount),
-                 golfObsForRound(player.score, round.holeCount), golfFairwaysHit(round, player.score),
-                 golfFairwaysEligible(round, player.score), golfGreensInRegulation(round, player.score),
-                 golfGreensEligible(round, player.score)) >= 0 &&
-         csv(output, filename) && fputc('\n', output) != EOF;
+    ok = writeIndexRow(output, filename, round, slot);
   }
   ok = ok && syncFile(output);
   if (fclose(output) != 0) ok = false;
@@ -122,6 +162,59 @@ bool appendIndex(const char* roundsPath, const char* filename, const GolfRound& 
     return false;
   }
   return syncDirectory(roundsPath);
+}
+
+bool stageIndexWithoutFile(const char* roundsPath, const char* filename, const GolfRound* replacement,
+                           size_t& originalRows, size_t& stagedRows, char* staged, const size_t stagedCapacity,
+                           char* live, const size_t liveCapacity) {
+  if (snprintf(live, liveCapacity, "%s/%s", roundsPath, GOLF_INDEX_FILE) >= static_cast<int>(liveCapacity) ||
+      snprintf(staged, stagedCapacity, "%s.new", live) >= static_cast<int>(stagedCapacity)) return false;
+  FILE* input = fopen(live, "rb");
+  FILE* output = fopen(staged, "wb");
+  if (input == nullptr || output == nullptr) {
+    if (input != nullptr) fclose(input);
+    if (output != nullptr) fclose(output);
+    unlink(staged);
+    return false;
+  }
+  char line[1024];
+  bool ok = fgets(line, sizeof(line), input) != nullptr && strcmp(line, INDEX_HEADER) == 0 &&
+            fputs(INDEX_HEADER, output) != EOF;
+  originalRows = 0;
+  stagedRows = 0;
+  while (ok && fgets(line, sizeof(line), input) != nullptr) {
+    ++originalRows;
+    if (lineMatchesFile(line, filename)) continue;
+    ok = fputs(line, output) != EOF;
+    if (ok) ++stagedRows;
+  }
+  if (ferror(input)) ok = false;
+  if (replacement != nullptr) {
+    for (uint8_t slot = 0; ok && slot < GolfRound::MAX_PLAYERS; ++slot) {
+      if (!golfPlayerIsEnabled(replacement->players[slot])) continue;
+      ok = writeIndexRow(output, filename, *replacement, slot);
+      if (ok) ++stagedRows;
+    }
+  }
+  ok = ok && syncFile(output);
+  fclose(input);
+  if (fclose(output) != 0) ok = false;
+  if (!ok) unlink(staged);
+  return ok;
+}
+
+bool loadArchive(const char* path, GolfRound& round) {
+  FILE* input = fopen(path, "rb");
+  if (input == nullptr || fseek(input, 0, SEEK_END) != 0) { if (input != nullptr) fclose(input); return false; }
+  const long length = ftell(input);
+  if (length <= 0 || length > 1024 * 1024 || fseek(input, 0, SEEK_SET) != 0) { fclose(input); return false; }
+  char* json = static_cast<char*>(malloc(static_cast<size_t>(length)));
+  if (json == nullptr) { fclose(input); return false; }
+  const bool read = fread(json, 1, static_cast<size_t>(length), input) == static_cast<size_t>(length);
+  fclose(input);
+  const bool ok = read && golfReadRoundJson(json, static_cast<size_t>(length), false, round).status == GolfJsonStatus::Ok;
+  free(json);
+  return ok;
 }
 
 }  // namespace
@@ -203,4 +296,44 @@ RoundArchiveResult archiveGolfRound(const GolfRound& round, char* filename, cons
   if (filename != nullptr && filenameCapacity != 0) snprintf(filename, filenameCapacity, "%s", chosen);
   free(checked);
   return RoundArchiveResult::Complete;
+}
+
+bool removeRound(const char* file) {
+  if (!validArchiveName(file)) return false;
+  char roundsPath[GOLF_PATH_CAPACITY], archivePath[GOLF_PATH_CAPACITY];
+  char staged[GOLF_PATH_CAPACITY], live[GOLF_PATH_CAPACITY];
+  if (!golfPath(roundsPath, sizeof(roundsPath), GOLF_ROUNDS_DIR) ||
+      snprintf(archivePath, sizeof(archivePath), "%s/%s", roundsPath, file) >= static_cast<int>(sizeof(archivePath))) return false;
+  size_t original = 0, remaining = 0;
+  if (!stageIndexWithoutFile(roundsPath, file, nullptr, original, remaining, staged, sizeof(staged), live, sizeof(live)) ||
+      original == remaining || getenv("GOLF_ARCHIVE_FAIL_BEFORE_INDEX_RENAME") != nullptr) {
+    unlink(staged);
+    return false;
+  }
+  if (unlink(archivePath) != 0 && errno != ENOENT) { unlink(staged); return false; }
+  if (rename(staged, live) != 0) { unlink(staged); return false; }
+  return syncDirectory(roundsPath);
+}
+
+bool removePlayerFromRound(const char* file, const uint8_t playerSlot) {
+  if (!validArchiveName(file) || playerSlot >= GolfRound::MAX_PLAYERS) return false;
+  char roundsPath[GOLF_PATH_CAPACITY], archivePath[GOLF_PATH_CAPACITY];
+  char staged[GOLF_PATH_CAPACITY], live[GOLF_PATH_CAPACITY];
+  if (!golfPath(roundsPath, sizeof(roundsPath), GOLF_ROUNDS_DIR) ||
+      snprintf(archivePath, sizeof(archivePath), "%s/%s", roundsPath, file) >= static_cast<int>(sizeof(archivePath))) return false;
+  GolfRound round{};
+  if (!loadArchive(archivePath, round) || !golfDisablePlayer(round, playerSlot) || golfEnabledPlayerCount(round) == 0) return false;
+  if (!golfPlayerIsEnabled(round.players[round.currentPlayer])) {
+    for (uint8_t slot = 0; slot < GolfRound::MAX_PLAYERS; ++slot) {
+      if (golfPlayerIsEnabled(round.players[slot])) { round.currentPlayer = slot; break; }
+    }
+  }
+  size_t original = 0, remaining = 0;
+  if (!stageIndexWithoutFile(roundsPath, file, &round, original, remaining, staged, sizeof(staged), live, sizeof(live)) ||
+      remaining + 1 != original || getenv("GOLF_ARCHIVE_FAIL_BEFORE_INDEX_RENAME") != nullptr) {
+    unlink(staged);
+    return false;
+  }
+  if (!writeArchiveFile(archivePath, round) || rename(staged, live) != 0) { unlink(staged); return false; }
+  return syncDirectory(roundsPath);
 }

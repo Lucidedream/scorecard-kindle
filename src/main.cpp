@@ -1,4 +1,5 @@
 #include "HitTester.h"
+#include "History.h"
 #include "HoleReviewScreen.h"
 #include "Keyboard.h"
 #include "MarkSheet.h"
@@ -56,11 +57,32 @@ enum Action {
   ViewBack,
   PlayerChip,
   SummaryDone,
+  HistoryPlayerFirst = 1000,
+  HistoryRoundFirst = 1010,
+  HistoryScorecard = 1100,
+  HistoryReview,
+  HistorySummary,
+  HistoryDelete,
 };
 
-enum class Screen { Home, History, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
+enum class Screen { Home, HistoryPlayers, HistoryRounds, HistoryRoundMenu, HistoryDetailUnavailable,
+                    HistoryDeleteConfirm, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
                     MarkSheet, Scorecard, Stats, HoleReview, ConfirmFinish, ConfirmAbandon, Summary,
                     ArchiveError };
+
+struct HistoryContext {
+  HistoryRow rows[GOLF_HISTORY_LIMIT];
+  HistoryPlayer players[GolfRound::MAX_PLAYERS];
+  const HistoryRow* playerRows[GOLF_HISTORY_LIMIT];
+  HistoryReadResult read;
+  size_t playerCount;
+  size_t roundCount;
+  size_t roundOffset;
+  uint8_t selectedSlot;
+  HistoryRow selectedRow;
+  GolfRound loadedRound;
+  bool loaded;
+};
 
 PgmCanvas canvas;
 HitTester hitTester;
@@ -68,6 +90,15 @@ uint8_t viewedPlayer = 0;
 uint8_t reviewedHole = 0;
 char archivedFilename[GOLF_ARCHIVE_NAME_CAPACITY]{};
 Screen viewReturnScreen = Screen::Menu;
+HistoryContext history{};
+
+void refreshHistory() {
+  history.read = golfReadHistoryIndex(history.rows, GOLF_HISTORY_LIMIT);
+  history.playerCount = golfHistoryPlayers(history.rows, history.read.count, history.players,
+                                           GolfRound::MAX_PLAYERS);
+  history.roundCount = golfHistoryRowsForPlayer(history.rows, history.read.count, history.selectedSlot,
+                                                history.playerRows, GOLF_HISTORY_LIMIT);
+}
 
 uint64_t nowMs() {
   timespec now{};
@@ -334,7 +365,8 @@ void drawScorecard(const GolfRound& round) {
   const ScorecardView view = scorecardView(round, viewedPlayer);
   hitTester.clear();
   canvas.clear();
-  drawViewHeader(view.header, view.roundValue, view.player, view.playerCount > 1);
+  drawViewHeader(view.header, view.roundValue, view.player,
+                 view.playerCount > 1 && viewReturnScreen != Screen::HistoryRoundMenu);
   constexpr int MARGIN = 28;
   constexpr int LABEL_W = 116;
   constexpr int DATA_W = (PgmCanvas::WIDTH - 2 * MARGIN - LABEL_W) / 10;
@@ -397,7 +429,8 @@ void drawStats(const GolfRound& round) {
   const StatsView view = statsView(round, viewedPlayer);
   hitTester.clear();
   canvas.clear();
-  drawViewHeader(view.header, view.score, view.player, view.playerCount > 1);
+  drawViewHeader(view.header, view.score, view.player,
+                 view.playerCount > 1 && viewReturnScreen != Screen::HistoryRoundMenu);
   static constexpr char LABELS[10][20] = {"Putts", "1-putts", "3-putts", "Long game", "Short game",
                                           "Putting", "Penalties", "Fairways", "Greens", "Worst holes"};
   const char* values[10] = {view.putts, view.onePutts, view.threePutts, view.longGame, view.shortGame,
@@ -469,7 +502,8 @@ void drawSummary(const GolfRound& round) {
   const SummaryView view = summaryView(round, viewedPlayer);
   hitTester.clear();
   canvas.clear();
-  drawViewHeader(view.header, "", view.player, view.playerCount > 1);
+  drawViewHeader(view.header, "", view.player,
+                 view.playerCount > 1 && viewReturnScreen != Screen::HistoryRoundMenu);
   canvas.drawText(PgmCanvas::WIDTH / 2, 206, view.score, TextSize::Display, TextAlign::Center);
   canvas.fillRect(420, 328, 232, 5);
   static constexpr char LABELS[7][18] = {"TO PAR", "PUTTS", "INSIDE 100", "LONG GAME", "PENALTIES",
@@ -487,13 +521,17 @@ void drawSummary(const GolfRound& round) {
     drawPair({cell.x - 24, cell.y, cell.width + 48, cell.height}, LABELS[index], values[index],
              TextSize::Body);
   }
-  char saved[160];
-  snprintf(saved, sizeof(saved), "Saved to rounds/%s.", archivedFilename);
-  canvas.drawText(PgmCanvas::WIDTH / 2, 1190, saved, TextSize::Small, TextAlign::Center, false, INK_DIM);
-  const Rect done{0, 1300, PgmCanvas::WIDTH, 148};
-  canvas.fillRect(done.x, done.y, done.width, done.height);
-  drawCentered(done, "DONE", TextSize::Body, true);
-  hitTester.add(done, Action::SummaryDone);
+  if (viewReturnScreen == Screen::HistoryRoundMenu) {
+    drawBottomBack();
+  } else {
+    char saved[160];
+    snprintf(saved, sizeof(saved), "Saved to rounds/%s.", archivedFilename);
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1190, saved, TextSize::Small, TextAlign::Center, false, INK_DIM);
+    const Rect done{0, 1300, PgmCanvas::WIDTH, 148};
+    canvas.fillRect(done.x, done.y, done.width, done.height);
+    drawCentered(done, "DONE", TextSize::Body, true);
+    hitTester.add(done, Action::SummaryDone);
+  }
 }
 
 void drawArchiveError() {
@@ -520,10 +558,142 @@ void drawAbandonConfirmation() {
   hitTester.add(yes, Action::ConfirmYes);
 }
 
+void drawHistoryBack() { drawBottomBack(); }
+
+void drawHistoryPlayers() {
+  hitTester.clear();
+  canvas.clear();
+  canvas.drawText(38, 48, "HISTORY", TextSize::Display);
+  if (!history.read.readable) {
+    canvas.drawText(PgmCanvas::WIDTH / 2, 410, "Couldn't read your rounds.", TextSize::Body, TextAlign::Center);
+  } else if (history.playerCount == 0) {
+    canvas.drawText(PgmCanvas::WIDTH / 2, 410, "No rounds yet", TextSize::Body, TextAlign::Center);
+  } else {
+    for (size_t i = 0; i < history.playerCount; ++i) {
+      const Rect row{36, 170 + static_cast<int>(i) * 210, 1000, 210};
+      canvas.fillRect(row.x, row.y, row.width, 2);
+      canvas.drawText(row.x + 24, row.y + 45, history.players[i].name, TextSize::Body);
+      char rounds[32];
+      snprintf(rounds, sizeof(rounds), "%zu round%s", history.players[i].roundCount,
+               history.players[i].roundCount == 1 ? "" : "s");
+      canvas.drawText(row.x + 24, row.y + 119, rounds, TextSize::Small, TextAlign::Left, false, INK_DIM);
+      canvas.drawText(row.x + row.width - 30, row.y + 73, ">", TextSize::Body, TextAlign::Right);
+      hitTester.add(row, Action::HistoryPlayerFirst + static_cast<int>(i));
+    }
+  }
+  drawHistoryBack();
+}
+
+void drawHistoryRounds() {
+  hitTester.clear();
+  canvas.clear();
+  const HistoryPlayer* selected = nullptr;
+  for (size_t i = 0; i < history.playerCount; ++i)
+    if (history.players[i].slot == history.selectedSlot) selected = &history.players[i];
+  char header[80];
+  snprintf(header, sizeof(header), "%s · %zu rounds", selected == nullptr ? "PLAYER" : selected->name,
+           history.roundCount);
+  canvas.drawText(38, 48, header, TextSize::Display);
+  const size_t remaining = history.roundCount > history.roundOffset ? history.roundCount - history.roundOffset : 0;
+  const size_t shown = remaining < 8 ? remaining : 8;
+  for (size_t i = 0; i < shown; ++i) {
+    const HistoryRow& item = *history.playerRows[history.roundOffset + i];
+    const Rect row{36, 150 + static_cast<int>(i) * 138, 1000, 138};
+    canvas.fillRect(row.x, row.y, row.width, 2);
+    canvas.drawText(row.x + 20, row.y + 24, item.course, TextSize::Body);
+    char detail[48];
+    snprintf(detail, sizeof(detail), "%s%s%u holes", item.date,
+             item.date[0] == '\0' ? "" : " · ", item.holes);
+    canvas.drawText(row.x + 20, row.y + 83, detail, TextSize::Small, TextAlign::Left, false, INK_DIM);
+    char score[12], toPar[12];
+    snprintf(score, sizeof(score), "%u", item.strokes);
+    if (item.par == 0) snprintf(toPar, sizeof(toPar), "—");
+    else if (item.strokes == item.par) snprintf(toPar, sizeof(toPar), "E");
+    else snprintf(toPar, sizeof(toPar), "%+d", static_cast<int>(item.strokes) - item.par);
+    canvas.drawText(row.x + row.width - 24, row.y + 18, score, TextSize::Body, TextAlign::Right);
+    canvas.drawText(row.x + row.width - 24, row.y + 80, toPar, TextSize::Small, TextAlign::Right, false, INK_DIM);
+    hitTester.add(row, Action::HistoryRoundFirst + static_cast<int>(i));
+  }
+  if (history.roundCount > 8)
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1250, "SWIPE FOR MORE", TextSize::Small,
+                    TextAlign::Center, false, INK_DIM);
+  else if (history.read.olderRoundsExist)
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1250, "Older rounds not shown", TextSize::Small,
+                    TextAlign::Center, false, INK_DIM);
+  drawHistoryBack();
+}
+
+void drawHistoryRoundMenu() {
+  hitTester.clear();
+  canvas.clear();
+  canvas.drawText(38, 48, "ROUND", TextSize::Display);
+  char subtitle[100];
+  snprintf(subtitle, sizeof(subtitle), "%s%s%s", history.selectedRow.course,
+           history.selectedRow.date[0] == '\0' ? "" : " · ", history.selectedRow.date);
+  canvas.drawText(38, 120, subtitle, TextSize::Small, TextAlign::Left, false, INK_DIM);
+  static constexpr const char* labels[4] = {"View scorecard", "Hole review", "Round summary", "Delete round"};
+  static constexpr int actions[4] = {Action::HistoryScorecard, Action::HistoryReview,
+                                     Action::HistorySummary, Action::HistoryDelete};
+  for (uint8_t i = 0; i < 4; ++i) {
+    const Rect row{36, 220 + i * 190, 1000, 190};
+    canvas.fillRect(row.x, row.y, row.width, 2);
+    canvas.drawText(row.x + 24, row.y + 58, labels[i], TextSize::Body);
+    hitTester.add(row, actions[i]);
+  }
+  drawHistoryBack();
+}
+
+void drawHistoryUnavailable() {
+  hitTester.clear();
+  canvas.clear();
+  canvas.drawText(PgmCanvas::WIDTH / 2, 330, "Hole-by-hole detail unavailable.", TextSize::Body,
+                  TextAlign::Center);
+  drawHistoryBack();
+}
+
+void drawHistoryDeleteConfirm() {
+  hitTester.clear();
+  canvas.clear();
+  const size_t shared = golfHistoryFileRowCount(history.rows, history.read.count, history.selectedRow.file);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 246,
+                  shared > 1 ? "REMOVE THIS PLAYER?" : "DELETE THIS ROUND?",
+                  TextSize::Display, TextAlign::Center);
+  char detail[160];
+  if (shared > 1) snprintf(detail, sizeof(detail), "Remove %s from this round? The other players keep their scores.",
+                           history.selectedRow.playerName);
+  else snprintf(detail, sizeof(detail), "Delete this round?");
+  canvas.drawText(PgmCanvas::WIDTH / 2, 410, detail, TextSize::Body, TextAlign::Center);
+  const Rect no{36, 650, 490, 220}, yes{546, 650, 490, 220};
+  canvas.drawRect(no.x, no.y, no.width, no.height, 2);
+  canvas.fillRect(yes.x, yes.y, yes.width, yes.height);
+  drawCentered(no, "NO", TextSize::Body);
+  drawCentered(yes, "YES", TextSize::Body, true);
+  hitTester.add(no, Action::ConfirmNo);
+  hitTester.add(yes, Action::ConfirmYes);
+}
+
+void drawHistoryFallbackSummary() {
+  const SummaryView view = golfHistorySummaryView(history.selectedRow);
+  hitTester.clear();
+  canvas.clear();
+  drawViewHeader(view.header, "", view.player, false);
+  canvas.drawText(PgmCanvas::WIDTH / 2, 206, view.score, TextSize::Display, TextAlign::Center);
+  static constexpr char LABELS[5][18] = {"TO PAR", "PUTTS", "INSIDE 100", "LONG GAME", "PENALTIES"};
+  const char* values[5] = {view.toPar, view.putts, view.in100, view.longGame, view.penalties};
+  const uint8_t first = view.hasPar ? 0 : 1;
+  for (uint8_t i = first, shown = 0; i < 5; ++i, ++shown) {
+    const Rect cell{36, 390 + shown * 145, 1000, 145};
+    canvas.fillRect(cell.x, cell.y, cell.width, 2);
+    drawPair(cell, LABELS[i], values[i], TextSize::Body);
+  }
+  canvas.drawText(PgmCanvas::WIDTH / 2, 1190, "Hole-by-hole detail unavailable.", TextSize::Small,
+                  TextAlign::Center, false, INK_DIM);
+  drawHistoryBack();
+}
+
 SetupScreen setupScreen(const Screen screen) {
   switch (screen) {
     case Screen::Home: return SetupScreen::Home;
-    case Screen::History: return SetupScreen::History;
     case Screen::Courses: return SetupScreen::Courses;
     case Screen::PlayerCount: return SetupScreen::PlayerCount;
     case Screen::Roster: return SetupScreen::Roster;
@@ -538,12 +708,19 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
            const MarkSheetState& markState, const bool showOnDevice, const bool fullRefresh) {
   switch (screen) {
     case Screen::Home:
-    case Screen::History:
     case Screen::Courses:
     case Screen::PlayerCount:
     case Screen::Roster:
     case Screen::EditPlayer:
     case Screen::TeeList: drawSetupScreen(canvas, hitTester, setupScreen(screen), setup, home); break;
+    case Screen::HistoryPlayers: drawHistoryPlayers(); break;
+    case Screen::HistoryRounds: drawHistoryRounds(); break;
+    case Screen::HistoryRoundMenu: drawHistoryRoundMenu(); break;
+    case Screen::HistoryDetailUnavailable:
+      if (viewReturnScreen == Screen::Summary) drawHistoryFallbackSummary();
+      else drawHistoryUnavailable();
+      break;
+    case Screen::HistoryDeleteConfirm: drawHistoryDeleteConfirm(); break;
     case Screen::Keyboard: drawKeyboard(canvas, hitTester, keyboard); break;
     case Screen::Scoring: drawScoring(round, focused); break;
     case Screen::MarkSheet: drawMarkSheet(round, markState); break;
@@ -623,6 +800,28 @@ int main(const int argc, char** argv) {
     makeGoldenRound(round);
     MarkSheetState markState = initialMarkSheetState();
     Screen screen = Screen::Home;
+    history = {};
+    history.read.readable = true;
+    history.read.count = 3;
+    history.playerCount = 2;
+    history.players[0] = {0, "Noah", 2};
+    history.players[1] = {1, "Maya", 1};
+    history.selectedSlot = 0;
+    for (size_t i = 0; i < 3; ++i) {
+      HistoryRow& item = history.rows[i];
+      snprintf(item.date, sizeof(item.date), "2026-09-%02zu", 8 + i);
+      snprintf(item.course, sizeof(item.course), "%s", i == 2 ? "Harbour Golf Club" : "Municipal Links");
+      item.holes = 18;
+      item.playerSlot = static_cast<uint8_t>(i == 0 ? 1 : 0);
+      snprintf(item.playerName, sizeof(item.playerName), "%s", item.playerSlot == 0 ? "Noah" : "Maya");
+      item.strokes = static_cast<uint16_t>(86 + i);
+      item.par = 72;
+      snprintf(item.file, sizeof(item.file), "round-%04zu-course.json", i + 1);
+    }
+    history.playerRows[0] = &history.rows[2];
+    history.playerRows[1] = &history.rows[1];
+    history.roundCount = 2;
+    history.selectedRow = history.rows[2];
     if (strcmp(argv[2], "keyboard") == 0) screen = Screen::Keyboard;
     else if (strcmp(argv[2], "scoring") == 0) screen = Screen::Scoring;
     else if (strcmp(argv[2], "mark-sheet") == 0) screen = Screen::MarkSheet;
@@ -633,6 +832,9 @@ int main(const int argc, char** argv) {
       reviewedHole = round.currentHole == 0 ? 0 : static_cast<uint8_t>(round.currentHole - 1);
     }
     else if (strcmp(argv[2], "summary") == 0) screen = Screen::Summary;
+    else if (strcmp(argv[2], "history-players") == 0) screen = Screen::HistoryPlayers;
+    else if (strcmp(argv[2], "history-rounds") == 0) screen = Screen::HistoryRounds;
+    else if (strcmp(argv[2], "history-round-menu") == 0) screen = Screen::HistoryRoundMenu;
     else if (strcmp(argv[2], "marked") == 0) {
       screen = Screen::Scoring;
       commitGolfPreview(round);
@@ -700,12 +902,76 @@ int main(const int argc, char** argv) {
         repaint = true;
         forceGc = true;
       } else if (action == SetupHistory) {
-        screen = Screen::History;
+        refreshHistory();
+        screen = Screen::HistoryPlayers;
         repaint = true;
         forceGc = true;
       }
-    } else if (screen == Screen::History && event.kind == TouchEvent::Kind::Tap && action == SetupBack) {
-      screen = Screen::Home;
+    } else if (screen == Screen::HistoryPlayers && event.kind == TouchEvent::Kind::Tap) {
+      if (action == Action::ViewBack) screen = Screen::Home;
+      else if (action >= Action::HistoryPlayerFirst &&
+               action < Action::HistoryPlayerFirst + static_cast<int>(history.playerCount)) {
+        history.selectedSlot = history.players[action - Action::HistoryPlayerFirst].slot;
+        history.roundCount = golfHistoryRowsForPlayer(history.rows, history.read.count, history.selectedSlot,
+                                                      history.playerRows, GOLF_HISTORY_LIMIT);
+        history.roundOffset = 0;
+        screen = Screen::HistoryRounds;
+      } else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::HistoryRounds) {
+      if (event.kind == TouchEvent::Kind::SwipeRight && history.roundOffset + 8 < history.roundCount) {
+        history.roundOffset += 8;
+      } else if (event.kind == TouchEvent::Kind::SwipeLeft && history.roundOffset != 0) {
+        history.roundOffset = history.roundOffset >= 8 ? history.roundOffset - 8 : 0;
+      } else if (event.kind == TouchEvent::Kind::Tap && action == Action::ViewBack) screen = Screen::HistoryPlayers;
+      else if (event.kind == TouchEvent::Kind::Tap && action >= Action::HistoryRoundFirst &&
+               action < Action::HistoryRoundFirst + static_cast<int>(history.roundCount) &&
+               action < Action::HistoryRoundFirst + 8) {
+        history.selectedRow = *history.playerRows[history.roundOffset + action - Action::HistoryRoundFirst];
+        history.loaded = false;
+        screen = Screen::HistoryRoundMenu;
+      } else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::HistoryRoundMenu && event.kind == TouchEvent::Kind::Tap) {
+      if (action == Action::ViewBack) screen = Screen::HistoryRounds;
+      else if (action == Action::HistoryDelete) screen = Screen::HistoryDeleteConfirm;
+      else if (action == Action::HistoryScorecard || action == Action::HistoryReview ||
+               action == Action::HistorySummary) {
+        history.loaded = golfReadHistoryRound(history.selectedRow.file, history.loadedRound);
+        if (history.loaded) {
+          round = history.loadedRound;
+          viewedPlayer = history.selectedRow.playerSlot;
+          reviewedHole = 0;
+          viewReturnScreen = Screen::HistoryRoundMenu;
+          screen = action == Action::HistoryScorecard ? Screen::Scorecard
+                   : action == Action::HistoryReview ? Screen::HoleReview : Screen::Summary;
+        } else {
+          viewReturnScreen = action == Action::HistorySummary ? Screen::Summary : Screen::HistoryRoundMenu;
+          screen = Screen::HistoryDetailUnavailable;
+        }
+      } else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::HistoryDetailUnavailable && event.kind == TouchEvent::Kind::Tap &&
+               action == Action::ViewBack) {
+      screen = Screen::HistoryRoundMenu;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::HistoryDeleteConfirm && event.kind == TouchEvent::Kind::Tap) {
+      if (action == Action::ConfirmNo) screen = Screen::HistoryRoundMenu;
+      else if (action == Action::ConfirmYes) {
+        const size_t group = golfHistoryFileRowCount(history.rows, history.read.count, history.selectedRow.file);
+        const bool removed = group > 1
+                                 ? removePlayerFromRound(history.selectedRow.file, history.selectedRow.playerSlot)
+                                 : removeRound(history.selectedRow.file);
+        if (!removed) { screen = Screen::HistoryRoundMenu; }
+        else {
+          refreshHistory();
+          screen = history.roundCount == 0 ? Screen::HistoryPlayers : Screen::HistoryRounds;
+        }
+      } else continue;
       repaint = true;
       forceGc = true;
     } else if (screen == Screen::Courses && event.kind == TouchEvent::Kind::Tap) {
@@ -938,7 +1204,11 @@ int main(const int argc, char** argv) {
         forceGc = true;
       }
     } else if (screen == Screen::Summary && event.kind == TouchEvent::Kind::Tap) {
-      if (action == Action::PlayerChip) {
+      if (action == Action::ViewBack && viewReturnScreen == Screen::HistoryRoundMenu) {
+        screen = Screen::HistoryRoundMenu;
+        repaint = true;
+        forceGc = true;
+      } else if (action == Action::PlayerChip) {
         viewedPlayer = nextEnabledPlayer(round, viewedPlayer);
         repaint = true;
         forceGc = true;

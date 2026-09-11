@@ -6,7 +6,7 @@
 #include "PgmCanvas.h"
 #include "core/Course.h"
 
-enum class SetupScreen { Home, History, Courses, PlayerCount, Roster, EditPlayer, TeeList };
+enum class SetupScreen { Home, Courses, PlayerCount, Roster, EditPlayer, TeeList };
 
 enum SetupAction {
   SetupNone = 100,

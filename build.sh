@@ -24,6 +24,7 @@ fi
   -I"$SCRIPT_DIR/src" \
   -I"$SCRIPT_DIR/src/core" \
   "$SCRIPT_DIR/src/main.cpp" \
+  "$SCRIPT_DIR/src/History.cpp" \
   "$SCRIPT_DIR/src/PgmCanvas.cpp" \
   "$SCRIPT_DIR/src/ScoringScreen.cpp" \
   "$SCRIPT_DIR/src/MarkSheet.cpp" \
