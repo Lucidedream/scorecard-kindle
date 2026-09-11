@@ -38,6 +38,9 @@ enum Action {
   In100Plus,
   Out100Minus,
   Out100Plus,
+  PuttsFocus,
+  In100Focus,
+  Out100Focus,
   Menu,
   Mark,
   MenuScorecard,
@@ -207,6 +210,8 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
                                                Action::Out100Minus};
   static constexpr Action PLUS_ACTIONS[3] = {Action::PuttsPlus, Action::In100Plus,
                                               Action::Out100Plus};
+  static constexpr Action FOCUS_ACTIONS[3] = {Action::PuttsFocus, Action::In100Focus,
+                                               Action::Out100Focus};
   for (uint8_t index = 0; index < 3; ++index) {
     const Rect rect = layout.metrics[index];
     if (index != 0) canvas.fillRect(38, rect.y, PgmCanvas::WIDTH - 76, 2);
@@ -231,6 +236,9 @@ void drawScoring(const GolfRound& round, const GolfField focused) {
                     value, size, TextAlign::Right, false, shade);
     hitTester.add(minus, MINUS_ACTIONS[index]);
     hitTester.add(layout.plus[index], PLUS_ACTIONS[index]);
+    // Registered last so it only catches taps outside the -/+ buttons above: tapping
+    // anywhere else on the row just moves focus here, without changing the count.
+    hitTester.add(rect, FOCUS_ACTIONS[index]);
   }
 
   canvas.fillRect(0, layout.totals.y, PgmCanvas::WIDTH, 2);
@@ -1090,6 +1098,14 @@ int main(const int argc, char** argv) {
           repaint = true;
         }
         if (focusChanged) {
+          repaint = true;
+          forceGc = true;
+        }
+      } else if (event.kind == TouchEvent::Kind::Tap && action >= Action::PuttsFocus &&
+                 action <= Action::Out100Focus) {
+        const GolfField field = static_cast<GolfField>(action - Action::PuttsFocus);
+        if (focused != field) {
+          focused = field;
           repaint = true;
           forceGc = true;
         }
