@@ -14,7 +14,7 @@ enum SetupAction {
   SetupHistory,
   SetupBack,
   SetupCourseFirst,
-  SetupCountMinus = SetupCourseFirst + 16,
+  SetupCountMinus = SetupCourseFirst + 32,
   SetupCountPlus,
   SetupPrimary,
   SetupPlayerFirst,
@@ -23,6 +23,9 @@ enum SetupAction {
   SetupTeeFirst,
   SetupExit = SetupTeeFirst + 100,
 };
+
+inline constexpr uint8_t GOLF_COURSES_PER_PAGE =
+    (PgmCanvas::HEIGHT - 150) / 250;
 
 struct HomeSummary {
   uint16_t rounds;
@@ -51,4 +54,5 @@ bool buildRoundFromSetup(const SetupState& setup, GolfRound& round);
 bool readHomeSummary(HomeSummary& summary);
 
 void drawSetupScreen(PgmCanvas& canvas, HitTester& hits, SetupScreen screen, const SetupState& setup,
-                     const HomeSummary& summary);
+                     const HomeSummary& summary, const Course* sdCourses, uint8_t sdCourseCount,
+                     uint8_t courseOffset);

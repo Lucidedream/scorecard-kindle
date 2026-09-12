@@ -96,12 +96,19 @@ void drawHome(PgmCanvas& canvas, HitTester& hits, const HomeSummary& summary) {
   hits.add(bottom, SetupHistory);
 }
 
-void drawCourses(PgmCanvas& canvas, HitTester& hits) {
+void drawCourses(PgmCanvas& canvas, HitTester& hits, const Course* sdCourses,
+                 const uint8_t sdCourseCount, const uint8_t offset) {
   header(canvas, hits, "CHOOSE COURSE");
   const int rowHeight = 250;
-  for (uint8_t index = 0; index < GOLF_BUILT_IN_COURSE_COUNT; ++index) {
-    const Course& course = GOLF_BUILT_IN_COURSES[index];
-    const Rect row{0, HEADER_HEIGHT + index * rowHeight, PgmCanvas::WIDTH, rowHeight};
+  const uint8_t total = static_cast<uint8_t>(GOLF_BUILT_IN_COURSE_COUNT + sdCourseCount);
+  const uint8_t remaining = total > offset ? static_cast<uint8_t>(total - offset) : 0;
+  const uint8_t shown = remaining < GOLF_COURSES_PER_PAGE ? remaining : GOLF_COURSES_PER_PAGE;
+  for (uint8_t rowIndex = 0; rowIndex < shown; ++rowIndex) {
+    const uint8_t index = static_cast<uint8_t>(offset + rowIndex);
+    const Course& course = index < GOLF_BUILT_IN_COURSE_COUNT
+                               ? GOLF_BUILT_IN_COURSES[index]
+                               : sdCourses[index - GOLF_BUILT_IN_COURSE_COUNT];
+    const Rect row{0, HEADER_HEIGHT + rowIndex * rowHeight, PgmCanvas::WIDTH, rowHeight};
     canvas.fillRect(34, row.y + row.height - 2, PgmCanvas::WIDTH - 68, 2);
     const int bodyY = row.y + (row.height - canvas.lineHeight(TextSize::Body)) / 2;
     canvas.drawText(48, bodyY - 28, course.name, TextSize::Body);
@@ -117,6 +124,9 @@ void drawCourses(PgmCanvas& canvas, HitTester& hits) {
                     par, TextSize::Display, TextAlign::Right);
     hits.add(row, SetupCourseFirst + index);
   }
+  if (total > GOLF_COURSES_PER_PAGE)
+    canvas.drawText(PgmCanvas::WIDTH - 34, 55, "SWIPE FOR MORE", TextSize::Small,
+                    TextAlign::Right, false, INK_DIM);
 }
 
 void drawCount(PgmCanvas& canvas, HitTester& hits, const SetupState& setup) {
@@ -288,12 +298,13 @@ bool readHomeSummary(HomeSummary& summary) {
 }
 
 void drawSetupScreen(PgmCanvas& canvas, HitTester& hits, const SetupScreen screen, const SetupState& setup,
-                     const HomeSummary& summary) {
+                     const HomeSummary& summary, const Course* sdCourses,
+                     const uint8_t sdCourseCount, const uint8_t courseOffset) {
   canvas.clear();
   hits.clear();
   switch (screen) {
     case SetupScreen::Home: drawHome(canvas, hits, summary); break;
-    case SetupScreen::Courses: drawCourses(canvas, hits); break;
+    case SetupScreen::Courses: drawCourses(canvas, hits, sdCourses, sdCourseCount, courseOffset); break;
     case SetupScreen::PlayerCount: drawCount(canvas, hits, setup); break;
     case SetupScreen::Roster: drawRoster(canvas, hits, setup); break;
     case SetupScreen::EditPlayer: drawEdit(canvas, hits, setup); break;

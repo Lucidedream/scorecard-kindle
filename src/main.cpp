@@ -91,6 +91,14 @@ struct HistoryContext {
   bool loaded;
 };
 
+constexpr uint8_t GOLF_SD_COURSE_CAPACITY = 16;
+
+struct CourseLibrary {
+  Course courses[GOLF_SD_COURSE_CAPACITY];
+  uint8_t count;
+  uint8_t offset;
+};
+
 PgmCanvas canvas;
 HitTester hitTester;
 uint8_t viewedPlayer = 0;
@@ -98,6 +106,12 @@ uint8_t reviewedHole = 0;
 char archivedFilename[GOLF_ARCHIVE_NAME_CAPACITY]{};
 Screen viewReturnScreen = Screen::Menu;
 HistoryContext history{};
+CourseLibrary courseLibrary{};
+
+void refreshCourseLibrary() {
+  courseLibrary.count = golfLoadSdCourses(courseLibrary.courses, GOLF_SD_COURSE_CAPACITY);
+  courseLibrary.offset = 0;
+}
 
 void refreshHistory() {
   history.read = golfReadHistoryIndex(history.rows, GOLF_HISTORY_LIMIT);
@@ -752,7 +766,10 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
     case Screen::PlayerCount:
     case Screen::Roster:
     case Screen::EditPlayer:
-    case Screen::TeeList: drawSetupScreen(canvas, hitTester, setupScreen(screen), setup, home); break;
+    case Screen::TeeList:
+      drawSetupScreen(canvas, hitTester, setupScreen(screen), setup, home, courseLibrary.courses,
+                      courseLibrary.count, courseLibrary.offset);
+      break;
     case Screen::HistoryPlayers: drawHistoryPlayers(); break;
     case Screen::HistoryRounds: drawHistoryRounds(); break;
     case Screen::HistoryRoundMenu: drawHistoryRoundMenu(); break;
@@ -872,6 +889,8 @@ int main(const int argc, char** argv) {
       reviewedHole = round.currentHole == 0 ? 0 : static_cast<uint8_t>(round.currentHole - 1);
     }
     else if (strcmp(argv[2], "summary") == 0) screen = Screen::Summary;
+    else if (strcmp(argv[2], "courses") == 0) screen = Screen::Courses;
+    else if (strcmp(argv[2], "courses-sd") == 0) { refreshCourseLibrary(); screen = Screen::Courses; }
     else if (strcmp(argv[2], "history-players") == 0) screen = Screen::HistoryPlayers;
     else if (strcmp(argv[2], "history-rounds") == 0) screen = Screen::HistoryRounds;
     else if (strcmp(argv[2], "history-round-menu") == 0) screen = Screen::HistoryRoundMenu;
@@ -938,6 +957,7 @@ int main(const int argc, char** argv) {
     if (screen == Screen::Home && event.kind == TouchEvent::Kind::Tap) {
       if (action == SetupNewRound) {
         initializeSetup(setup);
+        refreshCourseLibrary();
         screen = Screen::Courses;
         repaint = true;
         forceGc = true;
@@ -1017,13 +1037,28 @@ int main(const int argc, char** argv) {
       } else continue;
       repaint = true;
       forceGc = true;
-    } else if (screen == Screen::Courses && event.kind == TouchEvent::Kind::Tap) {
-      if (action == SetupBack) {
+    } else if (screen == Screen::Courses) {
+      const uint8_t totalCourses = static_cast<uint8_t>(GOLF_BUILT_IN_COURSE_COUNT + courseLibrary.count);
+      if (event.kind == TouchEvent::Kind::SwipeRight &&
+          courseLibrary.offset + GOLF_COURSES_PER_PAGE < totalCourses) {
+        courseLibrary.offset = static_cast<uint8_t>(courseLibrary.offset + GOLF_COURSES_PER_PAGE);
+        repaint = true;
+        forceGc = true;
+      } else if (event.kind == TouchEvent::Kind::SwipeLeft && courseLibrary.offset != 0) {
+        courseLibrary.offset = courseLibrary.offset >= GOLF_COURSES_PER_PAGE
+                                   ? static_cast<uint8_t>(courseLibrary.offset - GOLF_COURSES_PER_PAGE) : 0;
+        repaint = true;
+        forceGc = true;
+      } else if (event.kind == TouchEvent::Kind::Tap && action == SetupBack) {
         screen = Screen::Home;
         repaint = true;
         forceGc = true;
-      } else if (action >= SetupCourseFirst && action < SetupCourseFirst + GOLF_BUILT_IN_COURSE_COUNT) {
-        setup.course = &GOLF_BUILT_IN_COURSES[action - SetupCourseFirst];
+      } else if (event.kind == TouchEvent::Kind::Tap && action >= SetupCourseFirst &&
+                 action < SetupCourseFirst + totalCourses) {
+        const uint8_t index = static_cast<uint8_t>(action - SetupCourseFirst);
+        setup.course = index < GOLF_BUILT_IN_COURSE_COUNT
+                           ? &GOLF_BUILT_IN_COURSES[index]
+                           : &courseLibrary.courses[index - GOLF_BUILT_IN_COURSE_COUNT];
         for (uint8_t player = 0; player < GOLF_MAX_PLAYERS; ++player) setup.teeIndex[player] = 0;
         screen = Screen::PlayerCount;
         repaint = true;

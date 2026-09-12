@@ -126,6 +126,41 @@ void testSyntheticSetupWalks() {
   unsetenv("SCORECARD_DIR");
 }
 
+void testSdCourseSetupWalk() {
+  char root[] = "/tmp/scorecard-sd-setup-walk.XXXXXX";
+  assert(mkdtemp(root) != nullptr && setenv("SCORECARD_DIR", root, 1) == 0);
+  char coursesPath[256];
+  snprintf(coursesPath, sizeof(coursesPath), "%s/courses", root);
+  assert(mkdir(coursesPath, 0755) == 0);
+  char fixturePath[300];
+  snprintf(fixturePath, sizeof(fixturePath), "%s/home.json", coursesPath);
+  FILE* fixture = fopen(fixturePath, "wb");
+  assert(fixture != nullptr);
+  fputs("{\"name\":\"SD Home\",\"holes\":18,"
+        "\"par\":[3,4,5,4,3,4,5,4,4,3,4,5,4,3,4,5,4,4],"
+        "\"tees\":[{\"name\":\"Blue\",\"yards\":[101,202,303,204,105,206,307,208,209,110,211,312,213,114,215,316,217,218]},"
+        "{\"name\":\"White\",\"yards\":[91,192,293,194,95,196,297,198,199,100,201,302,203,104,205,306,207,208]}]}",
+        fixture);
+  assert(fclose(fixture) == 0);
+
+  Course courses[16]{};
+  assert(golfLoadSdCourses(courses, 16) == 1);
+  SetupState setup{};
+  initializeSetup(setup);
+  setup.course = &courses[0];
+  setup.teeIndex[0] = 1;
+  GolfRound round{};
+  assert(buildRoundFromSetup(setup, round) && RoundStore::write(round));
+  GolfRound loaded{};
+  assert(RoundStore::read(loaded).status == GolfJsonStatus::Ok);
+  assert(strcmp(loaded.courseName, "SD Home") == 0 && loaded.par[0] == 3 && loaded.par[2] == 5);
+  assert(strcmp(loaded.players[0].tee, "White") == 0 && loaded.players[0].yards[0] == 91 &&
+         loaded.players[0].yards[17] == 208);
+
+  assert(RoundStore::clear() && unlink(fixturePath) == 0 && rmdir(coursesPath) == 0 && rmdir(root) == 0);
+  unsetenv("SCORECARD_DIR");
+}
+
 }  // namespace
 
 int main() {
@@ -136,5 +171,6 @@ int main() {
   testKeyboard();
   testHomeSummary();
   testSyntheticSetupWalks();
+  testSdCourseSetupWalk();
   return 0;
 }

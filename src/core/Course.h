@@ -23,4 +23,5 @@ struct Course {
 extern const Course GOLF_BUILT_IN_COURSES[];
 extern const uint8_t GOLF_BUILT_IN_COURSE_COUNT;
 
+uint8_t golfLoadSdCourses(Course* output, uint8_t capacity);
 bool applyCourse(GolfRound& round, const Course& course, const char* tee);

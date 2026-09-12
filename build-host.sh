@@ -35,6 +35,12 @@ mkdir -p "$OUTPUT_DIR"
 
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
+  "$SCRIPT_DIR/tests/course_tests.cpp" "$SCRIPT_DIR/src/core/Course.cpp" \
+  "$SCRIPT_DIR/src/store/GolfPaths.cpp" \
+  -o "$OUTPUT_DIR/course_tests"
+
+"$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
+  -I"$SCRIPT_DIR/src" \
   "$SCRIPT_DIR/tests/golf_tests.cpp" \
   "$SCRIPT_DIR/src/core/Course.cpp" "$SCRIPT_DIR/src/core/GolfRules.cpp" \
   "$SCRIPT_DIR/src/core/GolfPenalty.cpp" "$SCRIPT_DIR/src/core/GolfStats.cpp" \
@@ -84,6 +90,7 @@ mkdir -p "$OUTPUT_DIR"
 
 "$OUTPUT_DIR/m0_tests"
 "$OUTPUT_DIR/battery_tests"
+SCORECARD_DIR="$SCRIPT_DIR/tests/fixtures/course-store" "$OUTPUT_DIR/course_tests"
 GOLF_TEST_DIR=$(mktemp -d /tmp/scorecard-golf-tests.XXXXXX)
 SCORECARD_DIR="$GOLF_TEST_DIR" "$OUTPUT_DIR/golf_tests"
 rm -r "$GOLF_TEST_DIR"
@@ -98,6 +105,9 @@ M6_TEST_DIR=$(mktemp -d /tmp/scorecard-m6-tests.XXXXXX)
 SCORECARD_DIR="$M6_TEST_DIR" "$OUTPUT_DIR/m6_tests"
 rm -r "$M6_TEST_DIR"
 "$OUTPUT_DIR/scorecard" --render home "$OUTPUT_DIR/home.pgm"
+"$OUTPUT_DIR/scorecard" --render courses "$OUTPUT_DIR/courses.pgm"
+SCORECARD_DIR="$SCRIPT_DIR/tests/fixtures/course-store" \
+  "$OUTPUT_DIR/scorecard" --render courses-sd "$OUTPUT_DIR/courses-sd.pgm"
 "$OUTPUT_DIR/scorecard" --render keyboard "$OUTPUT_DIR/keyboard.pgm"
 "$OUTPUT_DIR/scorecard" --render scoring "$OUTPUT_DIR/scoring.pgm"
 "$OUTPUT_DIR/scorecard" --render mark-sheet "$OUTPUT_DIR/mark-sheet.pgm"
@@ -112,4 +122,4 @@ rm -r "$M6_TEST_DIR"
 SELFTEST_DIR=$(mktemp -d /tmp/scorecard-selftest.XXXXXX)
 SCORECARD_DIR="$SELFTEST_DIR" "$OUTPUT_DIR/scorecard" --selftest
 rm -r "$SELFTEST_DIR"
-echo "Host tests passed; rendered setup, scoring, scorecard, stats, hole-review, summary, and history goldens"
+echo "Host tests passed; rendered setup, courses, scoring, scorecard, stats, hole-review, summary, and history goldens"
