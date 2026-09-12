@@ -10,6 +10,7 @@ mkdir -p "$OUTPUT_DIR"
 "$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
   -I"$SCRIPT_DIR/src" \
   "$SCRIPT_DIR/src/main.cpp" "$SCRIPT_DIR/src/Battery.cpp" "$SCRIPT_DIR/src/PgmCanvas.cpp" \
+  "$SCRIPT_DIR/src/CareerStatsScreen.cpp" \
   "$SCRIPT_DIR/src/ScoringScreen.cpp" \
   "$SCRIPT_DIR/src/History.cpp" \
   "$SCRIPT_DIR/src/MarkSheet.cpp" "$SCRIPT_DIR/src/ScorecardScreen.cpp" \
@@ -88,6 +89,15 @@ mkdir -p "$OUTPUT_DIR"
   "$SCRIPT_DIR/src/store/RoundStore.cpp" "$SCRIPT_DIR/src/store/RoundArchive.cpp" \
   -o "$OUTPUT_DIR/m6_tests"
 
+"$CXX_BIN" -std=c++20 -stdlib=libc++ -O2 -fno-exceptions -fno-rtti -Wall -Wextra -Werror \
+  -I"$SCRIPT_DIR/src" \
+  "$SCRIPT_DIR/tests/m10_tests.cpp" "$SCRIPT_DIR/src/CareerStatsScreen.cpp" "$SCRIPT_DIR/src/History.cpp" \
+  "$SCRIPT_DIR/src/core/Course.cpp" "$SCRIPT_DIR/src/core/GolfRules.cpp" \
+  "$SCRIPT_DIR/src/core/GolfPenalty.cpp" "$SCRIPT_DIR/src/core/GolfStats.cpp" \
+  "$SCRIPT_DIR/src/core/GolfCareerStats.cpp" "$SCRIPT_DIR/src/core/GolfValidate.cpp" \
+  "$SCRIPT_DIR/src/store/GolfPaths.cpp" "$SCRIPT_DIR/src/store/GolfJson.cpp" \
+  -o "$OUTPUT_DIR/m10_tests"
+
 "$OUTPUT_DIR/m0_tests"
 "$OUTPUT_DIR/battery_tests"
 SCORECARD_DIR="$SCRIPT_DIR/tests/fixtures/course-store" "$OUTPUT_DIR/course_tests"
@@ -104,6 +114,9 @@ rm -r "$M5_TEST_DIR"
 M6_TEST_DIR=$(mktemp -d /tmp/scorecard-m6-tests.XXXXXX)
 SCORECARD_DIR="$M6_TEST_DIR" "$OUTPUT_DIR/m6_tests"
 rm -r "$M6_TEST_DIR"
+M10_TEST_DIR=$(mktemp -d /tmp/scorecard-m10-tests.XXXXXX)
+SCORECARD_DIR="$M10_TEST_DIR" "$OUTPUT_DIR/m10_tests"
+rm -r "$M10_TEST_DIR"
 "$OUTPUT_DIR/scorecard" --render home "$OUTPUT_DIR/home.pgm"
 "$OUTPUT_DIR/scorecard" --render courses "$OUTPUT_DIR/courses.pgm"
 SCORECARD_DIR="$SCRIPT_DIR/tests/fixtures/course-store" \
@@ -119,7 +132,8 @@ SCORECARD_DIR="$SCRIPT_DIR/tests/fixtures/course-store" \
 "$OUTPUT_DIR/scorecard" --render history-players "$OUTPUT_DIR/history-players.pgm"
 "$OUTPUT_DIR/scorecard" --render history-rounds "$OUTPUT_DIR/history-rounds.pgm"
 "$OUTPUT_DIR/scorecard" --render history-round-menu "$OUTPUT_DIR/history-round-menu.pgm"
+"$OUTPUT_DIR/scorecard" --render career-stats "$OUTPUT_DIR/career-stats.pgm"
 SELFTEST_DIR=$(mktemp -d /tmp/scorecard-selftest.XXXXXX)
 SCORECARD_DIR="$SELFTEST_DIR" "$OUTPUT_DIR/scorecard" --selftest
 rm -r "$SELFTEST_DIR"
-echo "Host tests passed; rendered setup, courses, scoring, scorecard, stats, hole-review, summary, and history goldens"
+echo "Host tests passed; rendered setup, courses, scoring, scorecard, stats, hole-review, summary, history, and career-stats goldens"

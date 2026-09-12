@@ -1,4 +1,5 @@
 #include "Battery.h"
+#include "CareerStatsScreen.h"
 #include "HitTester.h"
 #include "History.h"
 #include "HoleReviewScreen.h"
@@ -12,6 +13,7 @@
 #include "TouchInput.h"
 #include "UiStyle.h"
 #include "core/Course.h"
+#include "core/GolfCareerStats.h"
 #include "core/GolfStats.h"
 #include "store/RoundArchive.h"
 #include "store/GolfPaths.h"
@@ -70,10 +72,11 @@ enum Action {
   HistoryReview,
   HistorySummary,
   HistoryDelete,
+  HistoryCareerStats,
 };
 
 enum class Screen { Home, HistoryPlayers, HistoryRounds, HistoryRoundMenu, HistoryDetailUnavailable,
-                    HistoryDeleteConfirm, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
+                    HistoryDeleteConfirm, CareerStats, Courses, PlayerCount, Roster, EditPlayer, TeeList, Keyboard, Scoring, Menu,
                     MarkSheet, Scorecard, Stats, HoleReview, ConfirmFinish, ConfirmAbandon, Summary,
                     ArchiveError };
 
@@ -99,6 +102,12 @@ struct CourseLibrary {
   uint8_t offset;
 };
 
+struct CareerStatsContext {
+  GolfCareerTally tally;
+  char playerName[GolfPlayer::NAME_CAPACITY];
+  uint8_t section;
+};
+
 PgmCanvas canvas;
 HitTester hitTester;
 uint8_t viewedPlayer = 0;
@@ -107,6 +116,7 @@ char archivedFilename[GOLF_ARCHIVE_NAME_CAPACITY]{};
 Screen viewReturnScreen = Screen::Menu;
 HistoryContext history{};
 CourseLibrary courseLibrary{};
+CareerStatsContext careerStats{};
 
 void refreshCourseLibrary() {
   courseLibrary.count = golfLoadSdCourses(courseLibrary.courses, GOLF_SD_COURSE_CAPACITY);
@@ -119,6 +129,24 @@ void refreshHistory() {
                                            GolfRound::MAX_PLAYERS);
   history.roundCount = golfHistoryRowsForPlayer(history.rows, history.read.count, history.selectedSlot,
                                                 history.playerRows, GOLF_HISTORY_LIMIT);
+}
+
+void loadCareerStats() {
+  careerStats = {};
+  for (size_t i = 0; i < history.playerCount; ++i) {
+    if (history.players[i].slot == history.selectedSlot) {
+      snprintf(careerStats.playerName, sizeof(careerStats.playerName), "%s", history.players[i].name);
+      break;
+    }
+  }
+  const HistoryRow* matches[GOLF_HISTORY_LIMIT];
+  const size_t count = golfHistoryRowsForPlayer(history.rows, history.read.count, history.selectedSlot,
+                                                matches, GOLF_HISTORY_LIMIT);
+  for (size_t i = 0; i < count; ++i) {
+    GolfRound archived{};
+    if (golfReadHistoryRound(matches[i]->file, archived))
+      golfFoldCareerRound(archived, matches[i]->playerSlot, careerStats.tally);
+  }
 }
 
 uint64_t nowMs() {
@@ -648,32 +676,60 @@ void drawHistoryRounds() {
   snprintf(header, sizeof(header), "%s · %zu rounds", selected == nullptr ? "PLAYER" : selected->name,
            history.roundCount);
   canvas.drawText(38, 48, header, TextSize::Display);
+  const Rect career{36, 120, 1000, 70};
+  canvas.fillRect(career.x, career.y, career.width, 2);
+  canvas.drawText(career.x + 20, career.y + 22, "CAREER STATS", TextSize::Small);
+  canvas.drawText(career.x + career.width - 24, career.y + 22, ">", TextSize::Small, TextAlign::Right);
+  hitTester.add(career, Action::HistoryCareerStats);
   const size_t remaining = history.roundCount > history.roundOffset ? history.roundCount - history.roundOffset : 0;
   const size_t shown = remaining < 8 ? remaining : 8;
   for (size_t i = 0; i < shown; ++i) {
     const HistoryRow& item = *history.playerRows[history.roundOffset + i];
-    const Rect row{36, 150 + static_cast<int>(i) * 138, 1000, 138};
+    const Rect row{36, 190 + static_cast<int>(i) * 128, 1000, 128};
     canvas.fillRect(row.x, row.y, row.width, 2);
     canvas.drawText(row.x + 20, row.y + 24, item.course, TextSize::Body);
     char detail[48];
     snprintf(detail, sizeof(detail), "%s%s%u holes", item.date,
              item.date[0] == '\0' ? "" : " · ", item.holes);
-    canvas.drawText(row.x + 20, row.y + 83, detail, TextSize::Small, TextAlign::Left, false, INK_DIM);
+    canvas.drawText(row.x + 20, row.y + 77, detail, TextSize::Small, TextAlign::Left, false, INK_DIM);
     char score[12], toPar[12];
     snprintf(score, sizeof(score), "%u", item.strokes);
     if (item.par == 0) snprintf(toPar, sizeof(toPar), "—");
     else if (item.strokes == item.par) snprintf(toPar, sizeof(toPar), "E");
     else snprintf(toPar, sizeof(toPar), "%+d", static_cast<int>(item.strokes) - item.par);
     canvas.drawText(row.x + row.width - 24, row.y + 18, score, TextSize::Body, TextAlign::Right);
-    canvas.drawText(row.x + row.width - 24, row.y + 80, toPar, TextSize::Small, TextAlign::Right, false, INK_DIM);
+    canvas.drawText(row.x + row.width - 24, row.y + 74, toPar, TextSize::Small, TextAlign::Right, false, INK_DIM);
     hitTester.add(row, Action::HistoryRoundFirst + static_cast<int>(i));
   }
   if (history.roundCount > 8)
-    canvas.drawText(PgmCanvas::WIDTH / 2, 1250, "SWIPE FOR MORE", TextSize::Small,
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1235, "SWIPE FOR MORE", TextSize::Small,
                     TextAlign::Center, false, INK_DIM);
   else if (history.read.olderRoundsExist)
-    canvas.drawText(PgmCanvas::WIDTH / 2, 1250, "Older rounds not shown", TextSize::Small,
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1235, "Older rounds not shown", TextSize::Small,
                     TextAlign::Center, false, INK_DIM);
+  drawHistoryBack();
+}
+
+void drawCareerStats() {
+  hitTester.clear();
+  canvas.clear();
+  const CareerStatsView view = careerStatsView(careerStats.tally, careerStats.section);
+  canvas.drawText(38, 48, view.title, TextSize::Display);
+  canvas.drawText(PgmCanvas::WIDTH - 38, 56, careerStats.playerName, TextSize::Small,
+                  TextAlign::Right, false, INK_DIM);
+  if (view.empty) {
+    canvas.drawText(PgmCanvas::WIDTH / 2, 410, "No rounds yet", TextSize::Body, TextAlign::Center);
+  } else {
+    constexpr int ROW_HEIGHT = 99;
+    int y = 220;
+    for (uint8_t row = 0; row < view.rowCount; ++row, y += ROW_HEIGHT) {
+      canvas.fillRect(36, y, PgmCanvas::WIDTH - 72, 2);
+      drawPair({4, y, PgmCanvas::WIDTH - 8, ROW_HEIGHT}, view.rows[row].label,
+               view.rows[row].value, TextSize::Small);
+    }
+    canvas.drawText(PgmCanvas::WIDTH / 2, 1215, "SWIPE FOR MORE", TextSize::Small,
+                    TextAlign::Center, false, INK_DIM);
+  }
   drawHistoryBack();
 }
 
@@ -778,6 +834,7 @@ bool paint(const char* path, const Screen screen, const GolfRound& round, const 
       else drawHistoryUnavailable();
       break;
     case Screen::HistoryDeleteConfirm: drawHistoryDeleteConfirm(); break;
+    case Screen::CareerStats: drawCareerStats(); break;
     case Screen::Keyboard: drawKeyboard(canvas, hitTester, keyboard); break;
     case Screen::Scoring: drawScoring(round, focused); break;
     case Screen::MarkSheet: drawMarkSheet(round, markState); break;
@@ -818,6 +875,22 @@ void makeGoldenRound(GolfRound& round) {
   }
   round.currentHole = 6;
   snprintf(archivedFilename, sizeof(archivedFilename), "round-0001-municipal-links.json");
+}
+
+void makeGoldenCareerStats() {
+  careerStats = {};
+  snprintf(careerStats.playerName, sizeof(careerStats.playerName), "Noah");
+  GolfRound sample{};
+  makeDefaultRound(sample);
+  snprintf(sample.courseName, sizeof(sample.courseName), "Municipal Links");
+  for (uint8_t hole = 0; hole < sample.holeCount; ++hole) {
+    sample.players[0].score.putts[hole] = static_cast<uint8_t>(hole % 5 == 0 ? 1 : 2);
+    sample.players[0].score.in100[hole] = sample.players[0].score.putts[hole];
+    sample.players[0].score.out100[hole] =
+        static_cast<uint8_t>(sample.par[hole] - sample.players[0].score.putts[hole]);
+  }
+  golfSetGreensideBunker(sample.players[0].score, 4, true);
+  golfFoldCareerRound(sample, 0, careerStats.tally);
 }
 
 bool startSetupRound(const SetupState& setup, GolfRound& round) {
@@ -894,6 +967,7 @@ int main(const int argc, char** argv) {
     else if (strcmp(argv[2], "history-players") == 0) screen = Screen::HistoryPlayers;
     else if (strcmp(argv[2], "history-rounds") == 0) screen = Screen::HistoryRounds;
     else if (strcmp(argv[2], "history-round-menu") == 0) screen = Screen::HistoryRoundMenu;
+    else if (strcmp(argv[2], "career-stats") == 0) { makeGoldenCareerStats(); screen = Screen::CareerStats; }
     else if (strcmp(argv[2], "marked") == 0) {
       screen = Screen::Scoring;
       commitGolfPreview(round);
@@ -988,12 +1062,26 @@ int main(const int argc, char** argv) {
       } else if (event.kind == TouchEvent::Kind::SwipeLeft && history.roundOffset != 0) {
         history.roundOffset = history.roundOffset >= 8 ? history.roundOffset - 8 : 0;
       } else if (event.kind == TouchEvent::Kind::Tap && action == Action::ViewBack) screen = Screen::HistoryPlayers;
+      else if (event.kind == TouchEvent::Kind::Tap && action == Action::HistoryCareerStats) {
+        loadCareerStats();
+        screen = Screen::CareerStats;
+      }
       else if (event.kind == TouchEvent::Kind::Tap && action >= Action::HistoryRoundFirst &&
                action < Action::HistoryRoundFirst + static_cast<int>(history.roundCount) &&
                action < Action::HistoryRoundFirst + 8) {
         history.selectedRow = *history.playerRows[history.roundOffset + action - Action::HistoryRoundFirst];
         history.loaded = false;
         screen = Screen::HistoryRoundMenu;
+      } else continue;
+      repaint = true;
+      forceGc = true;
+    } else if (screen == Screen::CareerStats) {
+      if (event.kind == TouchEvent::Kind::Tap && action == Action::ViewBack) {
+        screen = Screen::HistoryRounds;
+      } else if (event.kind == TouchEvent::Kind::SwipeRight) {
+        careerStats.section = stepCareerStatsSection(careerStats.section, true);
+      } else if (event.kind == TouchEvent::Kind::SwipeLeft) {
+        careerStats.section = stepCareerStatsSection(careerStats.section, false);
       } else continue;
       repaint = true;
       forceGc = true;
